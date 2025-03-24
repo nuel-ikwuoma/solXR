@@ -59,13 +59,6 @@ pub fn invest_handler(ctx: Context<Invest>, amount: u64) -> Result<()> {
         InvestError::ATACapError
     );
 
-    msg!("Minting token to associated token account...");
-    msg!("Mint: {}", &ctx.accounts.mint.key());
-    msg!(
-        "Token Address: {}",
-        &ctx.accounts.associated_token_account.key()
-    );
-
     // Get the bump for the mint authority PDA
     let mint_auth_bump = ctx.bumps.sol_strategy;
     let mint_auth_seeds: &[&[u8]] = &[SolStrategy::SEED_PREFIX, &[mint_auth_bump]];
@@ -82,7 +75,6 @@ pub fn invest_handler(ctx: Context<Invest>, amount: u64) -> Result<()> {
         ),
         amount,
     )?;
-    msg!("Sol transferred successfully.");
 
     // Mint token for payer
     mint_to(
@@ -97,8 +89,6 @@ pub fn invest_handler(ctx: Context<Invest>, amount: u64) -> Result<()> {
         .with_signer(mint_auth_signer),
         amount, // Since solxr and sol have the same decimals
     )?;
-
-    msg!("Token minted successfully.");
 
     Ok(())
 }

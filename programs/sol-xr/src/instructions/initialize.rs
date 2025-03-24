@@ -55,9 +55,6 @@ pub struct Initialize<'info> {
 }
 
 pub fn initialize_handler(ctx: Context<Initialize>, initial_pool_cap: u64,individual_address_cap: u64) -> Result<()> {
-    msg!("Creating metadata account...");
-    msg!("Metadata account address: {}", &ctx.accounts.metadata.key());
-
     // Initialize Sol Strategy
     ctx.accounts.sol_strategy.set_inner(SolStrategy {
         initial_pool_cap,
@@ -98,6 +95,5 @@ pub fn initialize_handler(ctx: Context<Initialize>, initial_pool_cap: u64,indivi
         None,  // Collection details
     )?;
 
-    msg!("Token mint created successfully.");
     Ok(())
 }
