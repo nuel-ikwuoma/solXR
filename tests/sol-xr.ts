@@ -33,44 +33,20 @@ describe("sol-xr", async () => {
 
     it("Is initialized!", async () => {
         // Find the mint authority PDA
-        const [mintAuthorityPDA] = PublicKey.findProgramAddressSync(
+        const [mintPDA] = PublicKey.findProgramAddressSync(
             [Buffer.from("solxr")],
             program.programId
         );
-
-        const mintPDA = new Keypair();
-
-        // Find the metadata PDA
-        const [metadataPDA] = PublicKey.findProgramAddressSync(
-            [
-                Buffer.from("metadata"),
-                METADATA_PROGRAM_ID.toBuffer(),
-                mintPDA.publicKey.toBuffer()
-            ],
-            METADATA_PROGRAM_ID
-        );
-
-        console.log({metadataPDA, mintPDA: mintPDA.publicKey, mintAuthorityPDA})
-
 
         const sig = await program
             .methods.initialize()
             .accounts({
                 payer: payer.publicKey,
-                mint: mintPDA.publicKey,
-                // @ts-ignore
-                mintAuthority: mintAuthorityPDA,
-                metadata: metadataPDA,
-                tokenMetadataProgram: METADATA_PROGRAM_ID,
-                tokenProgram: anchor.utils.token.TOKEN_PROGRAM_ID,
-                systemProgram: SystemProgram.programId,
-                rent: anchor.web3.SYSVAR_RENT_PUBKEY,
             })
-            .signers([payer.payer, mintPDA])
             .rpc();
 
         console.log('Success!');
-        console.log(`   Mint Address: ${mintPDA.publicKey}`);
+        console.log(`   Mint Address: ${mintPDA}`);
         console.log(`   Transaction Signature: ${sig}`);
     });
 
