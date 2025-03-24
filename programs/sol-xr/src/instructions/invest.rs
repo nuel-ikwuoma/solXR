@@ -1,5 +1,6 @@
 use {
     crate::state::sol_strategy::SolStrategy,
+    anchor_lang::prelude::Rent,
     anchor_lang::prelude::*,
     anchor_lang::system_program,
     anchor_spl::{
@@ -42,7 +43,10 @@ pub struct Invest<'info> {
 
 pub fn invest_handler(ctx: Context<Invest>, amount: u64) -> Result<()> {
     // Return error if amount would lead to an address going over the initial pool cap
-    let current_strategy_balance = ctx.accounts.sol_strategy.to_account_info().lamports();
+    let account_size = SolStrategy::INIT_SPACE + 8;
+    let rent_exempt_amount = Rent::get()?.minimum_balance(account_size);
+    let current_strategy_balance =
+        ctx.accounts.sol_strategy.to_account_info().lamports() - rent_exempt_amount;
     require!(
         (amount + current_strategy_balance) <= ctx.accounts.sol_strategy.initial_pool_cap,
         InvestError::InitialSolCapError
