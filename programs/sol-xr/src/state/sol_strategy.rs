@@ -5,8 +5,7 @@ use anchor_lang::{account, InitSpace};
 #[derive(InitSpace)]
 pub struct SolStrategy {
     pub initial_pool_cap: u64,
-    pub current_sol_balance: u64,   // todo: fetch from mint PDA balance
-    pub current_solxr_balance: u64, // todo: fetch from mint supply
+    pub individual_address_cap: u64,
 }
 
 impl SolStrategy {

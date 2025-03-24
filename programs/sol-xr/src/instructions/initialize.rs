@@ -1,6 +1,6 @@
 use {
     crate::state::sol_strategy::SolStrategy,
-    crate::{MINT_AUTHORITY_SEED_PREFIX, SOLXR_DECIMAL},
+    crate::{SOLXR_DECIMAL},
     anchor_lang::prelude::*,
     anchor_spl::{
         metadata::{
@@ -54,15 +54,14 @@ pub struct Initialize<'info> {
     pub rent: Sysvar<'info, Rent>,
 }
 
-pub fn handler(ctx: Context<Initialize>, initial_pool_cap: u64) -> Result<()> {
+pub fn initialize_handler(ctx: Context<Initialize>, initial_pool_cap: u64,individual_address_cap: u64) -> Result<()> {
     msg!("Creating metadata account...");
     msg!("Metadata account address: {}", &ctx.accounts.metadata.key());
 
     // Initialize Sol Strategy
     ctx.accounts.sol_strategy.set_inner(SolStrategy {
         initial_pool_cap,
-        current_sol_balance: 0,
-        current_solxr_balance: 0,
+        individual_address_cap,
     });
 
     // Get the bump for the mint authority PDA

@@ -10,7 +10,8 @@ import {
 import {BankrunProvider} from 'anchor-bankrun';
 import {startAnchor} from 'solana-bankrun';
 import {SolXr} from "../target/types/sol_xr";
-import {expect} from "chai";
+import {expect,} from "chai";
+import {getAssociatedTokenAddressSync, getAccount} from '@solana/spl-token'
 
 const IDL = require('../target/idl/sol_xr.json');
 const PROGRAM_ID = new PublicKey(IDL.address);
@@ -31,43 +32,114 @@ describe("sol-xr", async () => {
     const program = new anchor.Program<SolXr>(IDL, provider);
 
     const initialPoolCap = 10_000 * LAMPORTS_PER_SOL;
+    const individualAddressCap = 100 * LAMPORTS_PER_SOL;
 
-    it("Is initialized!", async () => {
-        // Generate a new keypair for the payer
-        const dev = Keypair.generate();
+    // Generate a new keypair for the payer
+    const dev = Keypair.generate();
+    await fundAccount(dev, 5000)
 
-        await fundAccount(dev, 500)
 
+    // Find the mint authority PDA
+    const [solStrategyPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from("sol_strategy")],
+        program.programId
+    );
+
+    // Find the mint PDA
+    const [mintPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from("mint")],
+        program.programId
+    );
+
+
+    async function initialize() {
         await program
-            .methods.initialize(new anchor.BN(initialPoolCap))
+            .methods.initialize(new anchor.BN(initialPoolCap), new anchor.BN(individualAddressCap))
             .accounts({
                 payer: dev.publicKey,
             })
             .signers([dev])
             .rpc();
+    }
 
-        // Find the mint PDA
-        const [mintPDA] = PublicKey.findProgramAddressSync(
-            [Buffer.from("mint")],
-            program.programId
-        );
-
-
-        console.log("Mint Address: ", mintPDA)
-
-        // Find the mint authority PDA
-        const [solStrategyPDA] = PublicKey.findProgramAddressSync(
-            [Buffer.from("sol_strategy")],
-            program.programId
-        );
-
+    it("Test Initialize", async () => {
+        await initialize();
         const solStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
+        expect(solStrategy.initialPoolCap.toNumber()).equal(initialPoolCap, "initial pool cap is wrong")
+        expect(solStrategy.individualAddressCap.toNumber()).equal(individualAddressCap, "initial pool cap is wrong")
 
-        expect(solStrategy.initialPoolCap.toNumber()).equal(10_000 * LAMPORTS_PER_SOL, "initial pool cap is wrong")
-        expect(solStrategy.currentSolBalance.toNumber()).equal(0, "current sol balance should be zero")
-        expect(solStrategy.currentSolxrBalance.toNumber()).equal(0, "current solxr balance should be zero")
+    })
 
+    it("Test Onetime Invest ", async () => {
+        const testCases = [
+            {
+                desc: "(amount is above cap)",
+                params: {amount: new anchor.BN(individualAddressCap + 1)},
+                expectedValue: 0,
+                shouldSucceed: false
+            },
+            {
+                desc: "(amount is valid 1)",
+                params: {amount: new anchor.BN(0.8 * individualAddressCap)},
+                expectedValue: 0.8 * individualAddressCap,
+                shouldSucceed: true
+            },
+            {
+                desc: "(amount is valid 2)",
+                params: {amount: new anchor.BN(0.2 * individualAddressCap)},
+                expectedValue: individualAddressCap,
+                shouldSucceed: true
+            },
+            {
+                desc: "(address balance is at cap)",
+                params: {amount: new anchor.BN(LAMPORTS_PER_SOL)},
+                expectedValue: 0,
+                shouldSucceed: false
+            },
+        ]
+        const investor = Keypair.generate();
+
+        for (const {desc, params, expectedValue, shouldSucceed} of testCases) {
+            console.log(`When ${desc}`)
+
+            await fundAccount(investor, 5000)
+            console.log({shouldSucceed})
+            if (shouldSucceed) {
+                await program.methods.invest(params.amount)
+                    .accounts({
+                        investor: investor.publicKey,
+                    })
+                    .signers([investor])
+                    .rpc();
+
+                const solStrategy = await program.provider.connection.getAccountInfo(solStrategyPDA);
+                const ata = getAssociatedTokenAddressSync(mintPDA, investor.publicKey);
+                let ataInfo = await getAccount(program.provider.connection, ata)
+
+                const dataSize = solStrategy.data.length;
+                const rentExemptionAmount = await program.provider.connection.getMinimumBalanceForRentExemption(dataSize);
+
+                console.log(`Rent-exempt minimum: ${rentExemptionAmount} lamports`);
+
+
+                expect(solStrategy.lamports).equal(expectedValue + rentExemptionAmount, "current sol balance is wrong")
+                expect(Number(ataInfo.amount)).equal(expectedValue, "current solxr balance is wrong")
+            } else {
+                try {
+                    await program.methods.invest(params.amount)
+                        .accounts({
+                            investor: investor.publicKey,
+                        })
+                        .signers([investor])
+                        .rpc();
+
+                    expect.fail("Expected an error but the instruction succeeded");
+                } catch (error) {
+                }
+            }
+        }
     });
+
 
     async function fundAccount(keyPair: Keypair, amount: number) {
         const instruction = SystemProgram.transfer({
@@ -78,4 +150,5 @@ describe("sol-xr", async () => {
         const transaction = new Transaction().add(instruction);
         await provider.sendAndConfirm(transaction, [payer.payer]);
     }
-});
+})
+;
