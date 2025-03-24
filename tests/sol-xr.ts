@@ -70,7 +70,9 @@ describe("sol-xr", async () => {
 
     })
 
-    it("Test Onetime Invest ", async () => {
+    // todo: test to see if initialized can be executed only once
+
+    it("Test Invest", async () => {
         const testCases = [
             {
                 desc: "(amount is above cap)",
