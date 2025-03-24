@@ -1,5 +1,5 @@
-use std::cmp::min;
 use {
+    crate::state::sol_strategy::SolStrategy,
     crate::{MINT_AUTHORITY_SEED_PREFIX, SOLXR_DECIMAL},
     anchor_lang::prelude::*,
     anchor_spl::{
@@ -25,15 +25,26 @@ pub struct Initialize<'info> {
     )]
     pub metadata: UncheckedAccount<'info>,
 
+    // Instantiate strategy
+    #[account(
+        init,
+        payer = payer,
+        space = 8 + SolStrategy::INIT_SPACE,
+        seeds = [SolStrategy::SEED_PREFIX],
+        bump
+    )]
+    pub sol_strategy: Account<'info, SolStrategy>,
+
     // Create new mint account
     #[account(
         init,
         payer = payer,
         mint::decimals = SOLXR_DECIMAL,
-        mint::authority = mint.key(),
-        mint::freeze_authority = mint.key(),
-        seeds = [MINT_AUTHORITY_SEED_PREFIX],
+        mint::authority = sol_strategy.key(),
+        mint::freeze_authority = sol_strategy.key(),
+        seeds = [b"mint"],
         bump
+
     )]
     pub mint: Account<'info, Mint>,
 
@@ -43,13 +54,20 @@ pub struct Initialize<'info> {
     pub rent: Sysvar<'info, Rent>,
 }
 
-pub fn handler(ctx: Context<Initialize>) -> Result<()> {
+pub fn handler(ctx: Context<Initialize>, initial_pool_cap: u64) -> Result<()> {
     msg!("Creating metadata account...");
     msg!("Metadata account address: {}", &ctx.accounts.metadata.key());
 
+    // Initialize Sol Strategy
+    ctx.accounts.sol_strategy.set_inner(SolStrategy {
+        initial_pool_cap,
+        current_sol_balance: 0,
+        current_solxr_balance: 0,
+    });
+
     // Get the bump for the mint authority PDA
-    let mint_auth_bump = ctx.bumps.mint;
-    let mint_auth_seeds: &[&[u8]] = &[MINT_AUTHORITY_SEED_PREFIX, &[mint_auth_bump]];
+    let mint_auth_bump = ctx.bumps.sol_strategy;
+    let mint_auth_seeds: &[&[u8]] = &[SolStrategy::SEED_PREFIX, &[mint_auth_bump]];
     let mint_auth_signer: &[&[&[u8]]] = &[&mint_auth_seeds[..]];
 
     // Cross Program Invocation (CPI)
@@ -61,8 +79,8 @@ pub fn handler(ctx: Context<Initialize>) -> Result<()> {
                 mint: ctx.accounts.mint.to_account_info(),
                 metadata: ctx.accounts.metadata.to_account_info(),
                 payer: ctx.accounts.payer.to_account_info(),
-                mint_authority: ctx.accounts.mint.to_account_info(),
-                update_authority: ctx.accounts.mint.to_account_info(),
+                mint_authority: ctx.accounts.sol_strategy.to_account_info(),
+                update_authority: ctx.accounts.sol_strategy.to_account_info(),
                 system_program: ctx.accounts.system_program.to_account_info(),
                 rent: ctx.accounts.rent.to_account_info(),
             },
@@ -82,6 +100,5 @@ pub fn handler(ctx: Context<Initialize>) -> Result<()> {
     )?;
 
     msg!("Token mint created successfully.");
-
     Ok(())
 }

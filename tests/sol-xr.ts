@@ -10,7 +10,7 @@ import {
 import {BankrunProvider} from 'anchor-bankrun';
 import {startAnchor} from 'solana-bankrun';
 import {SolXr} from "../target/types/sol_xr";
-import {min} from "bn.js";
+import {expect} from "chai";
 
 const IDL = require('../target/idl/sol_xr.json');
 const PROGRAM_ID = new PublicKey(IDL.address);
@@ -30,24 +30,43 @@ describe("sol-xr", async () => {
     const payer = provider.wallet as anchor.Wallet;
     const program = new anchor.Program<SolXr>(IDL, provider);
 
+    const initialPoolCap = 10_000 * LAMPORTS_PER_SOL;
 
     it("Is initialized!", async () => {
-        // Find the mint authority PDA
+        // Generate a new keypair for the payer
+        const dev = Keypair.generate();
+
+        await fundAccount(dev, 500)
+
+        await program
+            .methods.initialize(new anchor.BN(initialPoolCap))
+            .accounts({
+                payer: dev.publicKey,
+            })
+            .signers([dev])
+            .rpc();
+
+        // Find the mint PDA
         const [mintPDA] = PublicKey.findProgramAddressSync(
-            [Buffer.from("solxr")],
+            [Buffer.from("mint")],
             program.programId
         );
 
-        const sig = await program
-            .methods.initialize()
-            .accounts({
-                payer: payer.publicKey,
-            })
-            .rpc();
 
-        console.log('Success!');
-        console.log(`   Mint Address: ${mintPDA}`);
-        console.log(`   Transaction Signature: ${sig}`);
+        console.log("Mint Address: ", mintPDA)
+
+        // Find the mint authority PDA
+        const [solStrategyPDA] = PublicKey.findProgramAddressSync(
+            [Buffer.from("sol_strategy")],
+            program.programId
+        );
+
+        const solStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
+
+        expect(solStrategy.initialPoolCap.toNumber()).equal(10_000 * LAMPORTS_PER_SOL, "initial pool cap is wrong")
+        expect(solStrategy.currentSolBalance.toNumber()).equal(0, "current sol balance should be zero")
+        expect(solStrategy.currentSolxrBalance.toNumber()).equal(0, "current solxr balance should be zero")
+
     });
 
     async function fundAccount(keyPair: Keypair, amount: number) {

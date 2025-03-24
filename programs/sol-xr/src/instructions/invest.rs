@@ -7,4 +7,11 @@ use {
 };
 
 #[derive(Accounts)]
-pub struct MintToken<'info>
+pub struct Invest<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+}
+
+pub fn handler(ctx: Context<Invest>) -> Result<()> {
+    Ok(())
+}
