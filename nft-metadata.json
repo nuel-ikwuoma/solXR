@@ -1,7 +1,8 @@
 {
-  "name": "Solana Strategy Token",
-  "symbol": "SOLXR",
-  "description": "SOLXR is a tokenized asset designed for SOL accumulation, allowing holders to share in the profits generated from the SOL pool",
-  "image": "https://bafybeig53fzbd3acruagp5en4jepytwfnu7y47f3l2o57ntbbckobcixpq.ipfs.w3s.link/solxr.png"
+  "name": "Solana Strategy Bond",
+  "symbol": "XRBOND",
+  "description": "XRBOND NFT holders can claim their deposit at maturity or, if the price exceeds the strike price, they can redeem SOLXR tokens at the strike price.",
+  "image": "https://bafybeid6ome7ai5hp4wsc7osx2ar7c4hbbuxa3vuts6bv4r7qxa55ve4d4.ipfs.w3s.link/seal.png"
 }
 
+// https://bafybeiauoz3l4ssofopdg36a4teo5at6paavgjzvyhcyr5e4bvk5fwqlpy.ipfs.w3s.link/metadata.json

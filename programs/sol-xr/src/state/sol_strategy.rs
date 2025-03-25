@@ -6,6 +6,7 @@ use anchor_lang::{account, InitSpace};
 pub struct SolStrategy {
     pub initial_pool_cap: u64,
     pub individual_address_cap: u64,
+    pub bond_price: u64
 }
 
 impl SolStrategy {

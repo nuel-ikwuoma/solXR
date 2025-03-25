@@ -62,13 +62,12 @@ impl<'info> InitializeToken<'info> {
         bumps: &InitializeTokenBumps,
         initial_pool_cap: u64,
         individual_address_cap: u64,
-        bond_price: u64,
     ) -> Result<()> {
         // todo: make sure it is a set address that can execute this instruction
         self.sol_strategy.set_inner(SolStrategy {
             initial_pool_cap,
             individual_address_cap,
-            bond_price,
+            bond_price: 0,
         });
 
         let token_metadata = &self.token_metadata.to_account_info();

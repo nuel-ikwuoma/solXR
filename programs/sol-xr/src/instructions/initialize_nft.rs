@@ -16,35 +16,19 @@ use anchor_spl::{
 };
 
 #[derive(Accounts)]
-pub struct Initialize<'info> {
+pub struct InitializeNFT<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
+
     #[account(
-        init,
+        init_if_needed,
         payer = payer,
         space = 8 + SolStrategy::INIT_SPACE,
         seeds = [SolStrategy::SEED_PREFIX],
         bump
     )]
     pub sol_strategy: Account<'info, SolStrategy>,
-    #[account(
-        init,
-        payer = payer,
-        mint::decimals = SOLXR_DECIMAL,
-        mint::authority = sol_strategy.key(),
-        mint::freeze_authority = sol_strategy.key(),
-        seeds = [b"token"],
-        bump
-    )]
-    pub token: Account<'info, Mint>,
-    #[account(
-        mut,
-        seeds = [b"metadata", metadata_program.key().as_ref(), token.key().as_ref()],
-        bump,
-        seeds::program = metadata_program.key(),
-    )]
-    /// CHECK: Validated by PDA derivation
-    pub token_metadata: UncheckedAccount<'info>,
+
     #[account(
         init,
         payer = payer,
@@ -55,6 +39,7 @@ pub struct Initialize<'info> {
         bump
     )]
     pub nft: Account<'info, Mint>,
+
     #[account(
         mut,
         seeds = [b"metadata", metadata_program.key().as_ref(), nft.key().as_ref()],
@@ -63,6 +48,7 @@ pub struct Initialize<'info> {
     )]
     /// CHECK: Validated by PDA derivation
     pub nft_metadata: UncheckedAccount<'info>,
+
     #[account(
         mut,
         seeds = [b"metadata", metadata_program.key().as_ref(), nft.key().as_ref(), b"edition"],
@@ -71,6 +57,7 @@ pub struct Initialize<'info> {
     )]
     /// CHECK: Initialized by Metaplex
     pub master_edition: UncheckedAccount<'info>,
+
     #[account(
         init,
         payer = payer,
@@ -78,6 +65,7 @@ pub struct Initialize<'info> {
         associated_token::authority = payer,
     )]
     pub nft_token_account: Account<'info, TokenAccount>,
+
     pub metadata_program: Program<'info, Metadata>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
@@ -85,26 +73,19 @@ pub struct Initialize<'info> {
     pub rent: Sysvar<'info, Rent>,
 }
 
-impl<'info> Initialize<'info> {
+impl<'info> InitializeNFT<'info> {
     pub fn handler(
         &mut self,
-        bumps: &InitializeBumps,
-        initial_pool_cap: u64,
-        individual_address_cap: u64,
+        bumps: &InitializeNFTBumps,
         bond_price: u64,
     ) -> Result<()> {
         // todo: make sure it is a set address that can execute this instruction
-        self.sol_strategy.set_inner(SolStrategy {
-            initial_pool_cap,
-            individual_address_cap,
-            bond_price,
-        });
+
+        self.sol_strategy.bond_price = bond_price;
 
         let nft_metadata = &self.nft_metadata.to_account_info();
         let master_edition = &self.master_edition.to_account_info();
         let nft_mint = &self.nft.to_account_info();
-        let token_metadata = &self.token_metadata.to_account_info();
-        let token_mint = &self.token.to_account_info();
         let authority = &self.sol_strategy.to_account_info();
         let payer = &self.payer.to_account_info();
         let system_program = &self.system_program.to_account_info();
@@ -115,34 +96,6 @@ impl<'info> Initialize<'info> {
         let mint_auth_bump = bumps.sol_strategy;
         let mint_auth_seeds: &[&[u8]] = &[SolStrategy::SEED_PREFIX, &[mint_auth_bump]];
         let mint_auth_signer: &[&[&[u8]]] = &[&mint_auth_seeds[..]];
-
-        // Token Metadata
-        let token_metadata_account = CreateMetadataAccountV3Cpi::new(
-            metadata_program,
-            CreateMetadataAccountV3CpiAccounts {
-                mint: token_mint,
-                metadata: token_metadata,
-                payer,
-                mint_authority: authority,
-                update_authority: (authority, true),
-                system_program,
-                rent: Some(rent),
-            },
-            CreateMetadataAccountV3InstructionArgs {
-                data: DataV2 {
-                    name: "Solana Strategy Token".to_owned(),
-                    symbol: "SOLXR".to_owned(),
-                    uri: "https://bafybeiaozf4pmo62t6tqbe4d66yfilxssot37wiqtp4l7ilvy43jpnyp3a.ipfs.w3s.link/metadata.json".to_owned(),
-                    seller_fee_basis_points: 0,
-                    creators: None,
-                    collection: None,
-                    uses: None,
-                },
-                is_mutable: true,
-                collection_details: None,
-            },
-        );
-        token_metadata_account.invoke_signed(mint_auth_signer)?;
 
         // Mint 1 NFT token
         let mint_cpi = CpiContext::new_with_signer(

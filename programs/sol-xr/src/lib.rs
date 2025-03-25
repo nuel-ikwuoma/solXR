@@ -15,15 +15,19 @@ declare_id!("2oAJBBNEGWnxbH65MEWuehjjmbN6Gk9uLiK9Wt6cR3cT");
 pub mod sol_xr {
     use super::*;
 
-    pub fn initialize(
-        ctx: Context<Initialize>,
+    pub fn initialize_token(
+        ctx: Context<InitializeToken>,
         initial_pool_cap: u64,
         individual_address_cap: u64,
     ) -> Result<()> {
-        initialize_handler(ctx, initial_pool_cap, individual_address_cap)
+        ctx.accounts
+            .handler(&ctx.bumps, initial_pool_cap, individual_address_cap)
+    }
+    pub fn initialize_nft(ctx: Context<InitializeNFT>, bond_price: u64) -> Result<()> {
+        ctx.accounts.handler(&ctx.bumps, bond_price)
     }
 
     pub fn invest(ctx: Context<Invest>, amount: u64) -> Result<()> {
-        invest_handler(ctx, amount)
+        ctx.accounts.handler(&ctx.bumps, amount)
     }
 }
