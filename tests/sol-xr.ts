@@ -11,6 +11,8 @@ import {BankrunProvider} from 'anchor-bankrun';
 import {startAnchor} from 'solana-bankrun';
 import {SolXr} from "../target/types/sol_xr";
 import {expect,} from "chai";
+import devKey from '../dev.json'
+
 import {getAssociatedTokenAddressSync, getAccount, getMint} from '@solana/spl-token'
 
 const IDL = require('../target/idl/sol_xr.json');
@@ -35,8 +37,8 @@ describe("sol-xr", async () => {
     const bondPrice = LAMPORTS_PER_SOL;
 
     // Generate a new keypair for the payer
-    const dev = Keypair.generate();
-    await fundAccount(dev, 5000)
+    const dev = Keypair.fromSecretKey(new Uint8Array(devKey));
+    await fundAccount(dev, 50000)
 
 
     // Find the mint authority PDA
@@ -72,15 +74,8 @@ describe("sol-xr", async () => {
             .rpc();
     }
 
-    await it("should initialize token", async () => {
-        await initializeToken(dev, initialPoolCap, individualAddressCap);
-        const solStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
-        expect(solStrategy.initialPoolCap.toNumber()).equal(initialPoolCap, "initial pool cap is wrong")
-        expect(solStrategy.individualAddressCap.toNumber()).equal(individualAddressCap, "initial pool cap is wrong")
-        expect(solStrategy.bondPrice.toNumber()).equal(0, "bond price should be zero")
-    })
 
-    await it('should not initialize token again', async () => {
+    await it("should fail to initialize token", async () => {
         try {
             const badActor = Keypair.generate();
             await fundAccount(badActor, 5000)
@@ -88,9 +83,47 @@ describe("sol-xr", async () => {
             await initializeToken(badActor, initialPoolCap, individualAddressCap)
             expect.fail("Expected an error but the instruction succeeded");
         } catch (error) {
+            let msg = error.message as string
+            expect(msg.includes('AnchorError')).true
+            expect(msg.includes('Error Code: UNAUTHORIZED')).true
+            expect(msg.includes('Error Number: 6000')).true
+            expect(msg.includes('Error Message: The account that calls this function must match the token initializer.')).true
+        }
+    })
+
+    await it("should initialize token", async () => {
+        console.log(dev.publicKey)
+        await initializeToken(dev, initialPoolCap, individualAddressCap);
+        const solStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
+        expect(solStrategy.initialPoolCap.toNumber()).equal(initialPoolCap, "initial pool cap is wrong")
+        expect(solStrategy.individualAddressCap.toNumber()).equal(individualAddressCap, "initial pool cap is wrong")
+        expect(solStrategy.bondPrice.toNumber()).equal(0, "bond price should be zero")
+        expect(solStrategy.solInPool.toNumber()).equal(0, "bond price should be zero")
+    })
+
+    await it('should not initialize token again', async () => {
+        try {
+            await initializeToken(dev, initialPoolCap, individualAddressCap)
+            expect.fail("Expected an error but the instruction succeeded");
+        } catch (error) {
         }
     });
 
+    await it("should fail to initialize nft", async () => {
+        try {
+            const badActor = Keypair.generate();
+            await fundAccount(badActor, 5000)
+
+            await initializeNFT(badActor, bondPrice)
+            expect.fail("Expected an error but the instruction succeeded");
+        } catch (error) {
+            let msg = error.message as string
+            expect(msg.includes('AnchorError')).true
+            expect(msg.includes('Error Code: UNAUTHORIZED')).true
+            expect(msg.includes('Error Number: 6000')).true
+            expect(msg.includes('Error Message: The account that calls this function must match the nft initializer.')).true
+        }
+    })
 
     await it("should initialize nft", async () => {
         await initializeNFT(dev, bondPrice);
@@ -98,17 +131,20 @@ describe("sol-xr", async () => {
         expect(solStrategy.initialPoolCap.toNumber()).equal(initialPoolCap, "initial pool cap is wrong")
         expect(solStrategy.individualAddressCap.toNumber()).equal(individualAddressCap, "initial pool cap is wrong")
         expect(solStrategy.bondPrice.toNumber()).equal(bondPrice, "bond price is wrong")
+        expect(solStrategy.solInPool.toNumber()).equal(0, "bond price is wrong")
     })
+
     await it('should not initialize nft again', async () => {
         try {
             const badActor = Keypair.generate();
             await fundAccount(badActor, 5000)
 
-            await initializeToken(badActor, initialPoolCap, individualAddressCap)
+            await initializeNFT(badActor, bondPrice)
             expect.fail("Expected an error but the instruction succeeded");
         } catch (error) {
         }
     });
+
 
     await it("should test invest individual address cap", async () => {
         const testCases = [
@@ -150,13 +186,10 @@ describe("sol-xr", async () => {
                     .signers([investor])
                     .rpc();
 
-                const solStrategy = await program.provider.connection.getAccountInfo(solStrategyPDA);
-                const dataSize = solStrategy.data.length;
-                const rentExemptionAmount = await program.provider.connection.getMinimumBalanceForRentExemption(dataSize);
-
+                const solStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
                 const tokenInfo = await getMint(program.provider.connection, tokenPDA);
 
-                expect(solStrategy.lamports).equal(expectedValue + rentExemptionAmount, "current sol balance is wrong")
+                expect(solStrategy.solInPool.toNumber()).equal(expectedValue, "current sol balance is wrong")
                 expect(Number(tokenInfo.supply)).equal(expectedValue, "current solxr balance is wrong")
             } else {
                 try {
@@ -182,10 +215,10 @@ describe("sol-xr", async () => {
     await it("should max out the initial pool", async () => {
         const list = new Array((initialPoolCap / individualAddressCap) - 1)
 
-        const solStrategy = await program.provider.connection.getAccountInfo(solStrategyPDA);
+        const solStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
         const tokenInfo = await getMint(program.provider.connection, tokenPDA);
 
-        let prev_strategy_lamport = solStrategy.lamports;
+        let prev_strategy_lamport = solStrategy.solInPool.toNumber();
         let prev_mint_supply = tokenInfo.supply;
         for (const _ of list) {
             let investor = Keypair.generate()
@@ -197,10 +230,10 @@ describe("sol-xr", async () => {
                 .signers([investor])
                 .rpc();
 
-            const solStrategy = await program.provider.connection.getAccountInfo(solStrategyPDA);
+            const solStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
             const tokenInfo = await getMint(program.provider.connection, tokenPDA);
 
-            expect(solStrategy.lamports).equal(prev_strategy_lamport + individualAddressCap, "current sol balance is wrong")
+            expect(solStrategy.solInPool.toNumber()).equal(prev_strategy_lamport + individualAddressCap, "current sol balance is wrong")
             expect(Number(tokenInfo.supply)).equal(Number(prev_mint_supply) + individualAddressCap, "current solxr balance is wrong")
 
             prev_mint_supply += BigInt(individualAddressCap)

@@ -1,5 +1,6 @@
 use crate::constants::SOLXR_DECIMAL;
 use crate::state::sol_strategy::SolStrategy;
+use crate::TOKEN_INITIALIZER;
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
@@ -63,11 +64,13 @@ impl<'info> InitializeToken<'info> {
         initial_pool_cap: u64,
         individual_address_cap: u64,
     ) -> Result<()> {
-        // todo: make sure it is a set address that can execute this instruction
+        require!(self.payer.key() == TOKEN_INITIALIZER, Error::UNAUTHORIZED);
+
         self.sol_strategy.set_inner(SolStrategy {
             initial_pool_cap,
             individual_address_cap,
             bond_price: 0,
+            sol_in_pool: 0,
         });
 
         let token_metadata = &self.token_metadata.to_account_info();
@@ -112,4 +115,10 @@ impl<'info> InitializeToken<'info> {
 
         Ok(())
     }
+}
+
+#[error_code]
+pub enum Error {
+    #[msg("The account that calls this function must match the token initializer.")]
+    UNAUTHORIZED,
 }

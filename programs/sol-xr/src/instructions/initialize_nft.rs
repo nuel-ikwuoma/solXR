@@ -14,6 +14,7 @@ use anchor_spl::{
     },
     token::{mint_to, Mint, MintTo, Token, TokenAccount},
 };
+use crate::NFT_INITIALIZER;
 
 #[derive(Accounts)]
 pub struct InitializeNFT<'info> {
@@ -79,7 +80,7 @@ impl<'info> InitializeNFT<'info> {
         bumps: &InitializeNFTBumps,
         bond_price: u64,
     ) -> Result<()> {
-        // todo: make sure it is a set address that can execute this instruction
+        require!(self.payer.key() == NFT_INITIALIZER, Error::UNAUTHORIZED);
 
         self.sol_strategy.bond_price = bond_price;
 
@@ -157,4 +158,10 @@ impl<'info> InitializeNFT<'info> {
 
         Ok(())
     }
+}
+
+#[error_code]
+pub enum Error {
+    #[msg("The account that calls this function must match the nft initializer.")]
+    UNAUTHORIZED,
 }

@@ -43,21 +43,16 @@ pub struct Invest<'info> {
 
 impl<'info> Invest<'info> {
     pub fn handler(&mut self, bumps: &InvestBumps, amount: u64) -> Result<()> {
-        // Return error if amount would lead to an address going over the initial pool cap
-        let account_size = SolStrategy::INIT_SPACE + 8;
-        let rent_exempt_amount = Rent::get()?.minimum_balance(account_size);
-        let current_strategy_balance =
-            self.sol_strategy.to_account_info().lamports() - rent_exempt_amount;
         require!(
-            (amount + current_strategy_balance) <= self.sol_strategy.initial_pool_cap,
-            InvestError::InitialSolCapError
+            (amount + self.sol_strategy.sol_in_pool) <= self.sol_strategy.initial_pool_cap,
+            Error::InitialSolCapError
         );
 
         // Return error if amount would lead to an address going over the individual address cap
         let prev_account_balance = self.associated_token_account.amount;
         require!(
             (amount + prev_account_balance) <= self.sol_strategy.individual_address_cap,
-            InvestError::ATACapError
+            Error::ATACapError
         );
 
         // Get the bump for the mint authority PDA
@@ -91,12 +86,14 @@ impl<'info> Invest<'info> {
             amount, // Since solxr and sol have the same decimals
         )?;
 
+        self.sol_strategy.sol_in_pool += amount;
+
         Ok(())
     }
 }
 
 #[error_code]
-pub enum InvestError {
+pub enum Error {
     #[msg("The amount would cause the ATA balance to exceed the individual address cap.")]
     ATACapError,
     #[msg("The amount would cause the program PDA to exceed the initial pool cap.")]
