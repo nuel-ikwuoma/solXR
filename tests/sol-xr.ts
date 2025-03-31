@@ -6,6 +6,7 @@ import {
     PublicKey,
     SystemProgram,
     Transaction,
+    Connection
 } from '@solana/web3.js';
 import {BankrunProvider} from 'anchor-bankrun';
 import {startAnchor} from 'solana-bankrun';
@@ -28,15 +29,17 @@ describe("sol-xr", async () => {
         ],
         [],
     );
+    const connection = new Connection("http://localhost:8899");
+
     const provider = new BankrunProvider(context);
-    const payer = provider.wallet as anchor.Wallet;
+    const providerKeypair = provider.wallet as anchor.Wallet;
     const program = new anchor.Program<SolXr>(IDL, provider);
 
     const initialPoolCap = 10_000 * LAMPORTS_PER_SOL;
     const individualAddressCap = 100 * LAMPORTS_PER_SOL;
     const bondPrice = LAMPORTS_PER_SOL;
 
-    // Generate a new keypair for the payer
+    // Generate a new keypair for the governance_authority
     const dev = Keypair.fromSecretKey(new Uint8Array(devKey));
     await fundAccount(dev, 50000)
 
@@ -54,23 +57,23 @@ describe("sol-xr", async () => {
     );
 
 
-    async function initializeToken(payer: Keypair, initialPoolCap: number, individualAddressCap: number) {
+    async function initializeToken(governance_authority: Keypair, initialPoolCap: number, individualAddressCap: number) {
         await program
             .methods.initializeToken(new anchor.BN(initialPoolCap), new anchor.BN(individualAddressCap))
             .accounts({
-                payer: payer.publicKey,
+                governanceAuthority: governance_authority.publicKey,
             })
-            .signers([payer])
+            .signers([governance_authority])
             .rpc();
     }
 
-    async function initializeNFT(payer: Keypair, bondPrice: number) {
+    async function initializeNFT(governance_authority: Keypair, bondPrice: number) {
         await program
             .methods.initializeNft(new anchor.BN(bondPrice))
             .accounts({
-                payer: payer.publicKey,
+                governanceAuthority: governance_authority.publicKey,
             })
-            .signers([payer])
+            .signers([governance_authority])
             .rpc();
     }
 
@@ -97,8 +100,8 @@ describe("sol-xr", async () => {
         const solStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
         expect(solStrategy.initialPoolCap.toNumber()).equal(initialPoolCap, "initial pool cap is wrong")
         expect(solStrategy.individualAddressCap.toNumber()).equal(individualAddressCap, "initial pool cap is wrong")
-        expect(solStrategy.bondPrice.toNumber()).equal(0, "bond price should be zero")
-        expect(solStrategy.solInPool.toNumber()).equal(0, "bond price should be zero")
+        expect(solStrategy.bondPrice.toNumber()).equal(LAMPORTS_PER_SOL, "bond price should be 1 sol")
+        expect(solStrategy.solInTreasury.toNumber()).equal(0, "bond price should be zero")
     })
 
     await it('should not initialize token again', async () => {
@@ -131,7 +134,7 @@ describe("sol-xr", async () => {
         expect(solStrategy.initialPoolCap.toNumber()).equal(initialPoolCap, "initial pool cap is wrong")
         expect(solStrategy.individualAddressCap.toNumber()).equal(individualAddressCap, "initial pool cap is wrong")
         expect(solStrategy.bondPrice.toNumber()).equal(bondPrice, "bond price is wrong")
-        expect(solStrategy.solInPool.toNumber()).equal(0, "bond price is wrong")
+        expect(solStrategy.solInTreasury.toNumber()).equal(0, "bond price is wrong")
     })
 
     await it('should not initialize nft again', async () => {
@@ -189,7 +192,7 @@ describe("sol-xr", async () => {
                 const solStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
                 const tokenInfo = await getMint(program.provider.connection, tokenPDA);
 
-                expect(solStrategy.solInPool.toNumber()).equal(expectedValue, "current sol balance is wrong")
+                expect(solStrategy.solInTreasury.toNumber()).equal(expectedValue, "current sol balance is wrong")
                 expect(Number(tokenInfo.supply)).equal(expectedValue, "current solxr balance is wrong")
             } else {
                 try {
@@ -218,7 +221,7 @@ describe("sol-xr", async () => {
         const solStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
         const tokenInfo = await getMint(program.provider.connection, tokenPDA);
 
-        let prev_strategy_lamport = solStrategy.solInPool.toNumber();
+        let prev_strategy_lamport = solStrategy.solInTreasury.toNumber();
         let prev_mint_supply = tokenInfo.supply;
         for (const _ of list) {
             let investor = Keypair.generate()
@@ -233,7 +236,7 @@ describe("sol-xr", async () => {
             const solStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
             const tokenInfo = await getMint(program.provider.connection, tokenPDA);
 
-            expect(solStrategy.solInPool.toNumber()).equal(prev_strategy_lamport + individualAddressCap, "current sol balance is wrong")
+            expect(solStrategy.solInTreasury.toNumber()).equal(prev_strategy_lamport + individualAddressCap, "current sol balance is wrong")
             expect(Number(tokenInfo.supply)).equal(Number(prev_mint_supply) + individualAddressCap, "current solxr balance is wrong")
 
             prev_mint_supply += BigInt(individualAddressCap)
@@ -260,15 +263,132 @@ describe("sol-xr", async () => {
         }
     });
 
+    await it("should fail to open round for minting", async () => {
+        try {
+            const badActor = Keypair.generate();
+            await fundAccount(badActor, 5000)
+
+            await program.methods.openMintRound(new anchor.BN(1), new anchor.BN(LAMPORTS_PER_SOL))
+                .accounts({governanceAuthority: badActor.publicKey})
+                .signers([badActor])
+                .rpc();
+            expect.fail("Expected an error but the instruction succeeded");
+        } catch (error) {
+            let msg = error.message as string
+            expect(msg.includes('AnchorError')).true
+            expect(msg.includes('Error Code: UNAUTHORIZED')).true
+        }
+    })
+
+    await it("should opening round for minting", async () => {
+        const testCases = [
+            {
+                desc: "round id is invalid",
+                params: {
+                    roundID: 2,
+                    marketValue: 0
+                },
+                shouldSucceed: false,
+                expectedResults: {
+                    solxrMinted: 0,
+                    solxrAvailable: 0,
+                    errorCode: "InvalidRoundID",
+                }
+            },
+            {
+                desc: "market value is lower than threshold",
+                params: {
+                    roundID: 1,
+                    marketValue: 1.49 *LAMPORTS_PER_SOL
+                },
+                shouldSucceed: false,
+                expectedResults: {
+                    solxrMinted: 0,
+                    solxrAvailable: 0,
+                    errorCode: "PremiumBelowThreshold",
+                }
+            },
+            {
+                desc: "market value lower than threshold",
+                params: {
+                    roundID: 1,
+                    marketValue: 1.75 *LAMPORTS_PER_SOL
+                },
+                shouldSucceed: true,
+                expectedResults: {
+                    solxrMinted: 0,
+                    solxrAvailable: 1538461538461,
+                    errorCode: null,
+                }
+            },
+            {
+                desc: "round has already been opened",
+                params: {
+                    roundID: 1,
+                    marketValue: 1.75 *LAMPORTS_PER_SOL
+                },
+                shouldSucceed: false,
+                expectedResults: {
+                    solxrMinted: 0,
+                    solxrAvailable: 1538461538461,
+                    errorCode: "ActiveRound",
+                }
+            }
+        ]
+        for (const {desc, params, shouldSucceed, expectedResults} of testCases) {
+            console.log(`When ${desc}`)
+
+            if (shouldSucceed) {
+                await program.methods.openMintRound(new anchor.BN(params.roundID), new anchor.BN(params.marketValue))
+                    .accounts({governanceAuthority: dev.publicKey})
+                    .signers([dev])
+                    .rpc();
+                const idBuffer = Buffer.alloc(8);
+                idBuffer.writeBigUInt64LE(BigInt(params.roundID));
+
+                const [mintRoundPDA] = PublicKey.findProgramAddressSync(
+                    [Buffer.from("mint_round"), idBuffer],
+                    program.programId
+                );
+
+
+                const mintRound = await program.account.mintRound.fetch(mintRoundPDA)
+                const solStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
+
+                expect(solStrategy.allowNewMint).equal(true, "current sol balance is wrong")
+
+                expect(solStrategy.allowNewMint).equal(true, "current sol balance is wrong")
+
+                expect(mintRound.premium.toNumber()).equal(params.marketValue);
+                expect(mintRound.maxMintPerWallet.toNumber()).equal(solStrategy.maxMintPerWallet.toNumber());
+                expect(mintRound.solxrMinted.toNumber()).equal(expectedResults.solxrMinted);
+                expect(mintRound.solxrAvailable.toNumber()).equal(expectedResults.solxrAvailable)
+            } else {
+                try {
+                    await program.methods.openMintRound(new anchor.BN(params.roundID), new anchor.BN(params.marketValue))
+                        .accounts({governanceAuthority: dev.publicKey})
+                        .signers([dev])
+                        .rpc();
+
+                    expect.fail("Expected an error but the instruction succeeded");
+                } catch (error: any) {
+                    let msg = error.message as string
+                    expect(msg.includes('AnchorError')).true
+                    expect(msg.includes(`Error Code: ${expectedResults.errorCode}`)).true
+                }
+            }
+
+        }
+    })
 
     async function fundAccount(keyPair: Keypair, amount: number) {
         const instruction = SystemProgram.transfer({
-            fromPubkey: payer.publicKey,
+            fromPubkey: providerKeypair.publicKey,
             toPubkey: keyPair.publicKey,
             lamports: amount * LAMPORTS_PER_SOL,
         });
         const transaction = new Transaction().add(instruction);
-        await provider.sendAndConfirm(transaction, [payer.payer]);
+        await provider.sendAndConfirm(transaction, [providerKeypair.payer]);
     }
 })
 ;

@@ -1,6 +1,5 @@
-use crate::constants::SOLXR_DECIMAL;
+use crate::constants::{BOND_MATURITY, BOND_PRICE, DURATION, MAX_MINT_PER_WALLET, MINTING_ROUNDS, MIN_PREMIUM_NAV_RATIO, NAV_GROWTH_RATE, PLATFORM_MINT_FEE, GOVERNANCE_AUTHORITY,SOLXR_DECIMAL};
 use crate::state::sol_strategy::SolStrategy;
-use crate::TOKEN_INITIALIZER;
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
@@ -18,24 +17,27 @@ use anchor_spl::{
 
 #[derive(Accounts)]
 pub struct InitializeToken<'info> {
-    #[account(mut)]
-    pub payer: Signer<'info>,
+    #[account(
+        mut,
+        constraint = GOVERNANCE_AUTHORITY == governance_authority.key() @ Error::UNAUTHORIZED, // todo update to official controlled governance address
+    )]
+    pub governance_authority: Signer<'info>,
 
     #[account(
         init_if_needed,
-        payer = payer,
+        payer = governance_authority,
         space = 8 + SolStrategy::INIT_SPACE,
         seeds = [SolStrategy::SEED_PREFIX],
         bump
     )]
     pub sol_strategy: Account<'info, SolStrategy>,
 
+    // freeze authority removed to enable trading
     #[account(
         init,
-        payer = payer,
+        payer = governance_authority,
         mint::decimals = SOLXR_DECIMAL,
         mint::authority = sol_strategy.key(),
-        mint::freeze_authority = sol_strategy.key(),
         seeds = [b"token"],
         bump
     )]
@@ -52,7 +54,6 @@ pub struct InitializeToken<'info> {
 
     pub metadata_program: Program<'info, Metadata>,
     pub token_program: Program<'info, Token>,
-    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
 }
@@ -64,19 +65,27 @@ impl<'info> InitializeToken<'info> {
         initial_pool_cap: u64,
         individual_address_cap: u64,
     ) -> Result<()> {
-        require!(self.payer.key() == TOKEN_INITIALIZER, Error::UNAUTHORIZED);
-
         self.sol_strategy.set_inner(SolStrategy {
             initial_pool_cap,
             individual_address_cap,
-            bond_price: 0,
-            sol_in_pool: 0,
+            sol_in_treasury: 0,
+            governance_authority: GOVERNANCE_AUTHORITY, // todo update to official controlled governance address
+            allow_new_mint: false,
+            platform_mint_fee: PLATFORM_MINT_FEE,
+            max_mint_per_wallet: MAX_MINT_PER_WALLET,
+            min_premium_nav_ratio: MIN_PREMIUM_NAV_RATIO,
+            nav_growth_rate: NAV_GROWTH_RATE,
+            minting_rounds: MINTING_ROUNDS,
+            next_minting_rounds: 1,
+            duration: DURATION,
+            bond_price: BOND_PRICE,
+            bond_maturity: BOND_MATURITY,
         });
 
         let token_metadata = &self.token_metadata.to_account_info();
         let token_mint = &self.token.to_account_info();
         let authority = &self.sol_strategy.to_account_info();
-        let payer = &self.payer.to_account_info();
+        let payer = &self.governance_authority.to_account_info();
         let system_program = &self.system_program.to_account_info();
         let metadata_program = &self.metadata_program.to_account_info();
         let rent = &self.rent.to_account_info();

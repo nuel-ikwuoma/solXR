@@ -1,4 +1,4 @@
-use crate::constants::SOLXR_DECIMAL;
+use crate::constants::{SOLXR_DECIMAL,GOVERNANCE_AUTHORITY};
 use crate::state::sol_strategy::SolStrategy;
 use anchor_lang::prelude::*;
 use anchor_spl::{
@@ -14,16 +14,18 @@ use anchor_spl::{
     },
     token::{mint_to, Mint, MintTo, Token, TokenAccount},
 };
-use crate::NFT_INITIALIZER;
 
 #[derive(Accounts)]
 pub struct InitializeNFT<'info> {
-    #[account(mut)]
-    pub payer: Signer<'info>,
+    #[account(
+        mut,
+        constraint = GOVERNANCE_AUTHORITY == governance_authority.key() @ Error::UNAUTHORIZED, // todo update to official controlled governance address
+    )]
+    pub governance_authority: Signer<'info>,
 
     #[account(
         init_if_needed,
-        payer = payer,
+        payer = governance_authority,
         space = 8 + SolStrategy::INIT_SPACE,
         seeds = [SolStrategy::SEED_PREFIX],
         bump
@@ -32,7 +34,7 @@ pub struct InitializeNFT<'info> {
 
     #[account(
         init,
-        payer = payer,
+        payer = governance_authority,
         mint::decimals = 0,
         mint::authority = sol_strategy.key(),
         mint::freeze_authority = sol_strategy.key(),
@@ -61,9 +63,9 @@ pub struct InitializeNFT<'info> {
 
     #[account(
         init,
-        payer = payer,
+        payer = governance_authority,
         associated_token::mint = nft,
-        associated_token::authority = payer,
+        associated_token::authority = governance_authority,
     )]
     pub nft_token_account: Account<'info, TokenAccount>,
 
@@ -80,7 +82,6 @@ impl<'info> InitializeNFT<'info> {
         bumps: &InitializeNFTBumps,
         bond_price: u64,
     ) -> Result<()> {
-        require!(self.payer.key() == NFT_INITIALIZER, Error::UNAUTHORIZED);
 
         self.sol_strategy.bond_price = bond_price;
 
@@ -88,7 +89,7 @@ impl<'info> InitializeNFT<'info> {
         let master_edition = &self.master_edition.to_account_info();
         let nft_mint = &self.nft.to_account_info();
         let authority = &self.sol_strategy.to_account_info();
-        let payer = &self.payer.to_account_info();
+        let payer = &self.governance_authority.to_account_info();
         let system_program = &self.system_program.to_account_info();
         let token_program = &self.token_program.to_account_info();
         let metadata_program = &self.metadata_program.to_account_info();

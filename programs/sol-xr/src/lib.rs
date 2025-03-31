@@ -30,4 +30,11 @@ pub mod sol_xr {
     pub fn invest(ctx: Context<Invest>, amount: u64) -> Result<()> {
         ctx.accounts.handler(&ctx.bumps, amount)
     }
+    pub fn open_mint_round(
+        ctx: Context<OpenMintingRound>,
+        id: u64,
+        market_value: u64,
+    ) -> Result<()> {
+        ctx.accounts.handler(&ctx.bumps, id, market_value)
+    }
 }

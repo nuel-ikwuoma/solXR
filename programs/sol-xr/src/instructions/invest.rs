@@ -10,6 +10,7 @@ use {
 };
 
 #[derive(Accounts)]
+#[instruction(amount: u64)]
 pub struct Invest<'info> {
     #[account(mut)]
     pub investor: Signer<'info>,
@@ -31,6 +32,8 @@ pub struct Invest<'info> {
 
     #[account(
         mut,
+        constraint = amount + sol_strategy.sol_in_treasury <= sol_strategy.initial_pool_cap @ Error::InitialSolCapError,
+        constraint = amount + associated_token_account.amount <= sol_strategy.individual_address_cap @ Error::ATACapError,
         seeds = [SolStrategy::SEED_PREFIX],
         bump
     )]
@@ -43,24 +46,12 @@ pub struct Invest<'info> {
 
 impl<'info> Invest<'info> {
     pub fn handler(&mut self, bumps: &InvestBumps, amount: u64) -> Result<()> {
-        require!(
-            (amount + self.sol_strategy.sol_in_pool) <= self.sol_strategy.initial_pool_cap,
-            Error::InitialSolCapError
-        );
-
-        // Return error if amount would lead to an address going over the individual address cap
-        let prev_account_balance = self.associated_token_account.amount;
-        require!(
-            (amount + prev_account_balance) <= self.sol_strategy.individual_address_cap,
-            Error::ATACapError
-        );
-
         // Get the bump for the mint authority PDA
         let mint_auth_bump = bumps.sol_strategy;
         let mint_auth_seeds: &[&[u8]] = &[SolStrategy::SEED_PREFIX, &[mint_auth_bump]];
         let mint_auth_signer: &[&[&[u8]]] = &[&mint_auth_seeds[..]];
 
-        // Transfer SOL
+        // Transfer SOL to tresury
         system_program::transfer(
             CpiContext::new(
                 self.system_program.to_account_info(),
@@ -86,7 +77,7 @@ impl<'info> Invest<'info> {
             amount, // Since solxr and sol have the same decimals
         )?;
 
-        self.sol_strategy.sol_in_pool += amount;
+        self.sol_strategy.sol_in_treasury += amount;
 
         Ok(())
     }
