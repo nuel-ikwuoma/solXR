@@ -9,12 +9,11 @@ import {
     Connection
 } from '@solana/web3.js';
 import {BankrunProvider} from 'anchor-bankrun';
-import {startAnchor} from 'solana-bankrun';
+import {Clock, startAnchor} from 'solana-bankrun';
 import {SolXr} from "../target/types/sol_xr";
 import {expect,} from "chai";
 import devKey from '../dev.json'
-
-import {getAssociatedTokenAddressSync, getAccount, getMint} from '@solana/spl-token'
+import {getMint} from '@solana/spl-token'
 
 const IDL = require('../target/idl/sol_xr.json');
 const PROGRAM_ID = new PublicKey(IDL.address);
@@ -37,12 +36,13 @@ describe("sol-xr", async () => {
 
     const initialPoolCap = 10_000 * LAMPORTS_PER_SOL;
     const individualAddressCap = 100 * LAMPORTS_PER_SOL;
+    const maxMintPerWallet = 10 * LAMPORTS_PER_SOL;
     const bondPrice = LAMPORTS_PER_SOL;
 
     // Generate a new keypair for the governance_authority
     const dev = Keypair.fromSecretKey(new Uint8Array(devKey));
+    const platformDesignatedAccount = Keypair.fromSecretKey(new Uint8Array(devKey));
     await fundAccount(dev, 50000)
-
 
     // Find the mint authority PDA
     const [solStrategyPDA] = PublicKey.findProgramAddressSync(
@@ -55,7 +55,6 @@ describe("sol-xr", async () => {
         [Buffer.from("token")],
         program.programId
     );
-
 
     async function initializeToken(governance_authority: Keypair, initialPoolCap: number, individualAddressCap: number) {
         await program
@@ -77,7 +76,6 @@ describe("sol-xr", async () => {
             .rpc();
     }
 
-
     await it("should fail to initialize token", async () => {
         try {
             const badActor = Keypair.generate();
@@ -88,7 +86,7 @@ describe("sol-xr", async () => {
         } catch (error) {
             let msg = error.message as string
             expect(msg.includes('AnchorError')).true
-            expect(msg.includes('Error Code: UNAUTHORIZED')).true
+            expect(msg.includes('Error Code: UnauthorizedGovernanceAuthority')).true
             expect(msg.includes('Error Number: 6000')).true
             expect(msg.includes('Error Message: The account that calls this function must match the token initializer.')).true
         }
@@ -122,7 +120,7 @@ describe("sol-xr", async () => {
         } catch (error) {
             let msg = error.message as string
             expect(msg.includes('AnchorError')).true
-            expect(msg.includes('Error Code: UNAUTHORIZED')).true
+            expect(msg.includes('Error Code: UnauthorizedGovernanceAuthority')).true
             expect(msg.includes('Error Number: 6000')).true
             expect(msg.includes('Error Message: The account that calls this function must match the nft initializer.')).true
         }
@@ -147,7 +145,6 @@ describe("sol-xr", async () => {
         } catch (error) {
         }
     });
-
 
     await it("should test invest individual address cap", async () => {
         const testCases = [
@@ -254,6 +251,7 @@ describe("sol-xr", async () => {
                 })
                 .signers([lateInvestor])
                 .rpc();
+            expect.fail("Expected an error but the instruction succeeded");
         } catch (error) {
             let msg = error.message
             expect(msg.includes('AnchorError')).true
@@ -276,11 +274,11 @@ describe("sol-xr", async () => {
         } catch (error) {
             let msg = error.message as string
             expect(msg.includes('AnchorError')).true
-            expect(msg.includes('Error Code: UNAUTHORIZED')).true
+            expect(msg.includes('Error Code: UnauthorizedGovernanceAuthority')).true
         }
     })
 
-    await it("should opening round for minting", async () => {
+    await it("should open round for minting", async () => {
         const testCases = [
             {
                 desc: "round id is invalid",
@@ -292,27 +290,27 @@ describe("sol-xr", async () => {
                 expectedResults: {
                     solxrMinted: 0,
                     solxrAvailable: 0,
-                    errorCode: "InvalidRoundID",
+                    errorCode: "IncorrectRoundId",
                 }
             },
             {
                 desc: "market value is lower than threshold",
                 params: {
                     roundID: 1,
-                    marketValue: 1.49 *LAMPORTS_PER_SOL
+                    marketValue: 1.49 * LAMPORTS_PER_SOL
                 },
                 shouldSucceed: false,
                 expectedResults: {
                     solxrMinted: 0,
                     solxrAvailable: 0,
-                    errorCode: "PremiumBelowThreshold",
+                    errorCode: "MarketValueBelowMinPremium",
                 }
             },
             {
-                desc: "market value lower than threshold",
+                desc: "round open successfully",
                 params: {
                     roundID: 1,
-                    marketValue: 1.75 *LAMPORTS_PER_SOL
+                    marketValue: 1.75 * LAMPORTS_PER_SOL
                 },
                 shouldSucceed: true,
                 expectedResults: {
@@ -325,13 +323,13 @@ describe("sol-xr", async () => {
                 desc: "round has already been opened",
                 params: {
                     roundID: 1,
-                    marketValue: 1.75 *LAMPORTS_PER_SOL
+                    marketValue: 1.85 * LAMPORTS_PER_SOL
                 },
                 shouldSucceed: false,
                 expectedResults: {
                     solxrMinted: 0,
                     solxrAvailable: 1538461538461,
-                    errorCode: "ActiveRound",
+                    errorCode: "MintingAlreadyAllowed",
                 }
             }
         ]
@@ -373,6 +371,7 @@ describe("sol-xr", async () => {
                     expect.fail("Expected an error but the instruction succeeded");
                 } catch (error: any) {
                     let msg = error.message as string
+                    console.log(msg)
                     expect(msg.includes('AnchorError')).true
                     expect(msg.includes(`Error Code: ${expectedResults.errorCode}`)).true
                 }
@@ -380,6 +379,294 @@ describe("sol-xr", async () => {
 
         }
     })
+
+    await it("should mint solxr for investor", async () => {
+        const investor = Keypair.generate();
+        await fundAccount(investor, 5000)
+
+        const testCases = [
+            {
+                desc: "invalid round",
+                params: {
+                    roundID: 2,
+                    amount: LAMPORTS_PER_SOL,
+                    errorCode: "AccountNotInitialized"
+                },
+                expectedValue: 0,
+                shouldSucceed: false
+            },
+            {
+                desc: "amount is above available mint",
+                params: {
+                    roundID: 1,
+                    amount: new anchor.BN(2_692_307_692_309), // 2_692_307_692_309 sol in lamport is 1538461538461 solxr in lamport
+                    errorCode: "ExceedsAvailableSolXR"
+                },
+                expectedValue: 0,
+                shouldSucceed: false
+            },
+            {
+                desc: "amount is above wallet cap",
+                params: {
+                    roundID: 1,
+                    amount: new anchor.BN(maxMintPerWallet + 1),
+                    errorCode: "ExceedsMaxMintPerWallet"
+                },
+                expectedValue: 0,
+                shouldSucceed: false
+            },
+            {
+                desc: "amount is valid 1",
+                params: {
+                    roundID: 1,
+                    amount: new anchor.BN(0.8 * maxMintPerWallet),
+                    errorCode: null
+                },
+                expectedValue: 4434285714,
+                shouldSucceed: true
+            },
+            {
+                desc: "amount is valid 2",
+                params: {
+                    roundID: 1,
+                    amount: new anchor.BN(0.2 * maxMintPerWallet),
+                    errorCode: null
+                },
+                expectedValue: 5542857142, // 4434285714 + 1108571428
+                shouldSucceed: true
+            },
+            {
+                desc: "amount is above wallet cap",
+                params: {
+                    roundID: 1,
+                    amount: new anchor.BN(1),
+                    errorCode: "ExceedsMaxMintPerWallet"
+                },
+                expectedValue: 5542857142,
+                shouldSucceed: false
+            },
+            {
+                desc: "duration should be over",
+                params: {
+                    roundID: 1,
+                    amount: new anchor.BN(0),
+                    errorCode: "MintingDurationEnded"
+                },
+                expectedValue: 5542857142,
+                shouldSucceed: false,
+                forwardTime: true,
+            },
+        ]
+        for (const {desc, params, shouldSucceed, expectedValue, forwardTime} of testCases) {
+            console.log(`When ${desc}`)
+
+            if (shouldSucceed) {
+                const idBuffer = Buffer.alloc(8);
+                idBuffer.writeBigUInt64LE(BigInt(params.roundID));
+                const [mintRoundPDA] = PublicKey.findProgramAddressSync(
+                    [Buffer.from("mint_round"), idBuffer],
+                    program.programId
+                );
+                await program.methods.mintSolxr(new anchor.BN(params.roundID), new anchor.BN(params.amount))
+                    .accounts({investor: investor.publicKey, platformAddress: platformDesignatedAccount.publicKey})
+                    .signers([investor])
+                    .rpc();
+                const mintRound = await program.account.mintRound.fetch(mintRoundPDA)
+                expect(mintRound.solxrMinted.toNumber()).equal(expectedValue);
+            } else {
+                try {
+                    if (forwardTime) {
+                        const idBuffer = Buffer.alloc(8);
+                        idBuffer.writeBigUInt64LE(BigInt(params.roundID));
+                        const [mintRoundPDA] = PublicKey.findProgramAddressSync(
+                            [Buffer.from("mint_round"), idBuffer],
+                            program.programId
+                        );
+                        await program.methods.mintSolxr(new anchor.BN(params.roundID), new anchor.BN(params.amount))
+                            .accounts({
+                                investor: investor.publicKey,
+                                platformAddress: platformDesignatedAccount.publicKey
+                            })
+                            .signers([investor])
+                            .rpc();
+                        const mintRound = await program.account.mintRound.fetch(mintRoundPDA)
+                        const solStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
+
+                        let start = mintRound.start.toNumber();
+                        let duration = solStrategy.mintDuration.toNumber();
+                        const currentClock = await provider.context.banksClient.getClock();
+                        provider.context.setClock(
+                            new Clock(
+                                currentClock.slot,
+                                currentClock.epochStartTimestamp,
+                                currentClock.epoch,
+                                currentClock.leaderScheduleEpoch,
+                                BigInt(start + duration + 1),
+                            ),
+                        );
+                    }
+                    await program.methods.mintSolxr(new anchor.BN(params.roundID), new anchor.BN(params.amount))
+                        .accounts({investor: investor.publicKey, platformAddress: platformDesignatedAccount.publicKey})
+                        .signers([investor])
+                        .rpc();
+
+                    expect.fail("Expected an error but the instruction succeeded");
+                } catch (error: any) {
+                    let msg = error.message as string
+                    console.log(msg, "->", params.errorCode)
+                    expect(msg.includes('AnchorError')).true
+                    expect(msg.includes(`Error Code: ${params.errorCode}`)).true
+                }
+            }
+
+        }
+    })
+
+    await it("should max out available solxr to mint", async () => {
+        const list = new Array(276);
+        const roundID = 1
+        const idBuffer = Buffer.alloc(8);
+        idBuffer.writeBigUInt64LE(BigInt(roundID));
+        const [mintRoundPDA] = PublicKey.findProgramAddressSync(
+            [Buffer.from("mint_round"), idBuffer],
+            program.programId
+        );
+        const mintRound = await program.account.mintRound.fetch(mintRoundPDA)
+        // reverse time
+        let start = mintRound.start.toNumber();
+        const currentClock = await provider.context.banksClient.getClock();
+        provider.context.setClock(
+            new Clock(
+                currentClock.slot,
+                currentClock.epochStartTimestamp,
+                currentClock.epoch,
+                currentClock.leaderScheduleEpoch,
+                BigInt(start),
+            ),
+        );
+
+        let expectedValue = 5542857142;
+
+        for (const _ of list) {
+            let investor = Keypair.generate()
+            await fundAccount(investor, 500)
+            await program.methods.mintSolxr(new anchor.BN(roundID), new anchor.BN(maxMintPerWallet))
+                .accounts({investor: investor.publicKey, platformAddress: platformDesignatedAccount.publicKey})
+                .signers([investor])
+                .rpc();
+
+            const mintRound = await program.account.mintRound.fetch(mintRoundPDA)
+
+            expect(mintRound.solxrMinted.toNumber()).equal(expectedValue + 5542857142);
+
+            expectedValue += 5542857142;
+        }
+    });
+
+    await it("should fail address trying to invest", async () => {
+        try {
+            const roundID = 1
+            let lateInvestor = Keypair.generate()
+            await fundAccount(lateInvestor, 500)
+            await program.methods.mintSolxr(new anchor.BN(roundID), new anchor.BN(maxMintPerWallet))
+                .accounts({investor: lateInvestor.publicKey, platformAddress: platformDesignatedAccount.publicKey})
+                .signers([lateInvestor])
+                .rpc();
+            expect.fail("Expected an error but the instruction succeeded");
+        } catch (error) {
+            let msg = error.message
+            console.log(msg)
+            expect(msg.includes('AnchorError')).true
+            expect(msg.includes('Error Code: ExceedsAvailableSolXR')).true
+        }
+    });
+
+    async function closeMintingRound(governance_authority: Keypair) {
+        await program
+            .methods.closeMintRound()
+            .accounts({
+                governanceAuthority: governance_authority.publicKey,
+            })
+            .signers([governance_authority])
+            .rpc();
+    }
+
+    await it("should fail to close minting round", async () => {
+        try {
+            const badActor = Keypair.generate();
+            await fundAccount(badActor, 5000)
+
+            await closeMintingRound(badActor)
+            expect.fail("Expected an error but the instruction succeeded");
+        } catch (error) {
+            let msg = error.message as string
+            console.log(msg)
+            expect(msg.includes('AnchorError')).true
+            expect(msg.includes('Error Code: UnauthorizedGovernanceAuthority')).true
+        }
+    })
+
+    await it("should close minting round", async () => {
+        await closeMintingRound(dev);
+        const solStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
+        expect(solStrategy.allowNewMint).equal(false, "allow_new_mint should be false")
+        expect(solStrategy.nextMintingRounds.toNumber()).equal(2, "next minting round id should be 2")
+    })
+
+    await it('should not close minting round when already closed', async () => {
+        try {
+            await closeMintingRound(dev)
+            expect.fail("Expected an error but the instruction succeeded");
+        } catch (error) {
+            let msg = error.message as string
+            console.log(msg)
+            expect(msg.includes('AnchorError')).true
+            expect(msg.includes('Error Code: MintingAlreadyClosed')).true
+        }
+    });
+
+    await it('should fail address trying to invest after close', async () => {
+        try {
+            let lateInvestor = Keypair.generate()
+            await fundAccount(lateInvestor, 500)
+
+            await program.methods.mintSolxr(new anchor.BN(1), new anchor.BN(maxMintPerWallet))
+                .accounts({investor: lateInvestor.publicKey, platformAddress: platformDesignatedAccount.publicKey})
+                .signers([lateInvestor])
+                .rpc();
+            expect.fail("Expected an error but the instruction succeeded");
+        } catch (error) {
+            let msg = error.message as string
+            console.log(msg)
+            expect(msg.includes('AnchorError')).true
+            expect(msg.includes('Error Code: MintingNotAllowed')).true
+        }
+    });
+
+    await it('should fail address trying to invest in old round', async () => {
+        try {
+            await program.methods.openMintRound(new anchor.BN(2), new anchor.BN(2 * LAMPORTS_PER_SOL))
+                .accounts({governanceAuthority: dev.publicKey})
+                .signers([dev])
+                .rpc();
+
+            let lateInvestor = Keypair.generate()
+            await fundAccount(lateInvestor, 500)
+
+            await program.methods.mintSolxr(new anchor.BN(1), new anchor.BN(maxMintPerWallet))
+                .accounts({investor: lateInvestor.publicKey, platformAddress: platformDesignatedAccount.publicKey})
+                .signers([lateInvestor])
+                .rpc();
+            expect.fail("Expected an error but the instruction succeeded");
+        } catch (error) {
+            let msg = error.message as string
+            console.log(msg)
+            expect(msg.includes('AnchorError')).true
+            expect(msg.includes('Error Code: InvalidMintingRound')).true
+            await closeMintingRound(dev)
+        }
+    });
+
 
     async function fundAccount(keyPair: Keypair, amount: number) {
         const instruction = SystemProgram.transfer({
@@ -390,5 +677,4 @@ describe("sol-xr", async () => {
         const transaction = new Transaction().add(instruction);
         await provider.sendAndConfirm(transaction, [providerKeypair.payer]);
     }
-})
-;
+});

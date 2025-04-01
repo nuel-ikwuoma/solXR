@@ -51,7 +51,7 @@ impl<'info> Invest<'info> {
         let mint_auth_seeds: &[&[u8]] = &[SolStrategy::SEED_PREFIX, &[mint_auth_bump]];
         let mint_auth_signer: &[&[&[u8]]] = &[&mint_auth_seeds[..]];
 
-        // Transfer SOL to tresury
+        // Transfer SOL to treasury
         system_program::transfer(
             CpiContext::new(
                 self.system_program.to_account_info(),

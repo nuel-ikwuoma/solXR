@@ -19,7 +19,7 @@ use anchor_spl::{
 pub struct InitializeNFT<'info> {
     #[account(
         mut,
-        constraint = GOVERNANCE_AUTHORITY == governance_authority.key() @ Error::UNAUTHORIZED, // todo update to official controlled governance address
+        constraint = GOVERNANCE_AUTHORITY == governance_authority.key() @ Error::UnauthorizedGovernanceAuthority, // todo update to official controlled governance address
     )]
     pub governance_authority: Signer<'info>,
 
@@ -164,5 +164,5 @@ impl<'info> InitializeNFT<'info> {
 #[error_code]
 pub enum Error {
     #[msg("The account that calls this function must match the nft initializer.")]
-    UNAUTHORIZED,
+    UnauthorizedGovernanceAuthority,
 }

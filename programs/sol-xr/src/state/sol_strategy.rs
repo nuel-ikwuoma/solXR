@@ -13,6 +13,9 @@ pub struct SolStrategy {
     /// An account with governance authority responsible for executing all governance-controlled instructions
     pub governance_authority: Pubkey,
 
+    /// Designated Account for platform
+    pub platform_address: Pubkey,
+
     // Minting New Shares
     /// Allow SolXR to be minted
     pub allow_new_mint: bool,
@@ -27,9 +30,9 @@ pub struct SolStrategy {
     /// Number of minting rounds
     pub minting_rounds: u64,
     /// Number of minting rounds
-    pub next_minting_rounds: u64, // todo: add 1 after end of each mint
+    pub next_minting_rounds: u64,
     /// Duration for minting
-    pub duration: u64, // todo: update after each mint wrt to conditions
+    pub mint_duration: u64,
 
 
     // Buying convertible bonds

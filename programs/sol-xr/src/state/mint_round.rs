@@ -19,5 +19,6 @@ impl MintRound {
 #[account]
 #[derive(InitSpace)]
 pub struct AssociatedRoundAccount {
+    /// amount minted in sol
     pub amount_minted: u64,
 }

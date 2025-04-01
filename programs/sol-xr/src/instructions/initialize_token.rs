@@ -14,12 +14,13 @@ use anchor_spl::{
     },
     token::{mint_to, Mint, MintTo, Token, TokenAccount},
 };
+use crate::PLATFORM_ADDRESS;
 
 #[derive(Accounts)]
 pub struct InitializeToken<'info> {
     #[account(
         mut,
-        constraint = GOVERNANCE_AUTHORITY == governance_authority.key() @ Error::UNAUTHORIZED, // todo update to official controlled governance address
+        constraint = GOVERNANCE_AUTHORITY == governance_authority.key() @ Error::UnauthorizedGovernanceAuthority, // todo update to official controlled governance address
     )]
     pub governance_authority: Signer<'info>,
 
@@ -69,7 +70,8 @@ impl<'info> InitializeToken<'info> {
             initial_pool_cap,
             individual_address_cap,
             sol_in_treasury: 0,
-            governance_authority: GOVERNANCE_AUTHORITY, // todo update to official controlled governance address
+            governance_authority: self.governance_authority.key(), // todo update to official controlled governance address
+            platform_address: PLATFORM_ADDRESS,
             allow_new_mint: false,
             platform_mint_fee: PLATFORM_MINT_FEE,
             max_mint_per_wallet: MAX_MINT_PER_WALLET,
@@ -77,7 +79,7 @@ impl<'info> InitializeToken<'info> {
             nav_growth_rate: NAV_GROWTH_RATE,
             minting_rounds: MINTING_ROUNDS,
             next_minting_rounds: 1,
-            duration: DURATION,
+            mint_duration: DURATION,
             bond_price: BOND_PRICE,
             bond_maturity: BOND_MATURITY,
         });
@@ -129,5 +131,5 @@ impl<'info> InitializeToken<'info> {
 #[error_code]
 pub enum Error {
     #[msg("The account that calls this function must match the token initializer.")]
-    UNAUTHORIZED,
+    UnauthorizedGovernanceAuthority,
 }

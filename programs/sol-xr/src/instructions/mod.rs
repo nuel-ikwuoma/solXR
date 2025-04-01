@@ -10,3 +10,5 @@ pub use initialize_nft::*;
 pub use initialize_token::*;
 pub use invest::*;
 pub use open_minting_round::*;
+pub use close_minting_round::*;
+pub use mint_solxr::*;

@@ -13,6 +13,8 @@ declare_id!("2oAJBBNEGWnxbH65MEWuehjjmbN6Gk9uLiK9Wt6cR3cT");
 
 #[program]
 pub mod sol_xr {
+    use anchor_spl::token::accessor::amount;
+    use crate::mint_solxr::MintSolXR;
     use super::*;
 
     pub fn initialize_token(
@@ -36,5 +38,17 @@ pub mod sol_xr {
         market_value: u64,
     ) -> Result<()> {
         ctx.accounts.handler(&ctx.bumps, id, market_value)
+    }
+    pub fn close_mint_round(
+        ctx: Context<CloseMintingRound>,
+    ) -> Result<()> {
+        ctx.accounts.handler(&ctx.bumps)
+    }
+    pub fn mint_solxr(
+        ctx: Context<MintSolXR>,
+        id: u64,
+        amount: u64,
+    ) -> Result<()> {
+        ctx.accounts.handler(&ctx.bumps, id, amount)
     }
 }
