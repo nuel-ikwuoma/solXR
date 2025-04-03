@@ -1,6 +1,6 @@
 use {
     crate::{
-        state::{bond::Bond, sol_strategy::SolStrategy},
+        state::{bonds::Bond, sol_strategy::SolStrategy},
     },
     anchor_lang::prelude::*,
     anchor_spl::{

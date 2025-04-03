@@ -1,20 +1,22 @@
-use crate::constants::{BOND_MATURITY, BOND_PRICE, DURATION, MAX_MINT_PER_WALLET, MINTING_ROUNDS, MIN_PREMIUM_NAV_RATIO, NAV_GROWTH_RATE, PLATFORM_MINT_FEE, GOVERNANCE_AUTHORITY,SOLXR_DECIMAL};
-use crate::state::sol_strategy::SolStrategy;
-use anchor_lang::prelude::*;
-use anchor_spl::{
-    associated_token::AssociatedToken,
-    metadata::{
-        mpl_token_metadata::instructions::{
-            CreateMasterEditionV3Cpi, CreateMasterEditionV3CpiAccounts,
-            CreateMasterEditionV3InstructionArgs, CreateMetadataAccountV3Cpi,
-            CreateMetadataAccountV3CpiAccounts, CreateMetadataAccountV3InstructionArgs,
-        },
-        mpl_token_metadata::types::{CollectionDetails, DataV2},
-        CreateMetadataAccountsV3, Metadata,
+use {
+    crate::{
+        state::sol_strategy::SolStrategy, DURATION,
+        GOVERNANCE_AUTHORITY, MAX_MINT_PER_WALLET, MAX_PLATFORM_MINT_FEE, MINTING_ROUNDS,
+        MIN_PREMIUM_NAV_RATIO, NAV_GROWTH_RATE, PLATFORM_ADDRESS, PLATFORM_MINT_FEE, SOLXR_DECIMAL,
     },
-    token::{mint_to, Mint, MintTo, Token, TokenAccount},
+    anchor_lang::prelude::*,
+    anchor_spl::{
+        metadata::{
+            mpl_token_metadata::instructions::{
+                CreateMetadataAccountV3Cpi,
+                CreateMetadataAccountV3CpiAccounts, CreateMetadataAccountV3InstructionArgs,
+            },
+            mpl_token_metadata::types::{DataV2},
+            Metadata,
+        },
+        token::{Mint,  Token},
+    },
 };
-use crate::PLATFORM_ADDRESS;
 
 #[derive(Accounts)]
 pub struct InitializeToken<'info> {
@@ -25,7 +27,7 @@ pub struct InitializeToken<'info> {
     pub governance_authority: Signer<'info>,
 
     #[account(
-        init_if_needed,
+        init,
         payer = governance_authority,
         space = 8 + SolStrategy::INIT_SPACE,
         seeds = [SolStrategy::SEED_PREFIX],
@@ -70,18 +72,19 @@ impl<'info> InitializeToken<'info> {
             initial_pool_cap,
             individual_address_cap,
             sol_in_treasury: 0,
+            sol_from_bond: 0,
             governance_authority: self.governance_authority.key(), // todo update to official controlled governance address
             platform_address: PLATFORM_ADDRESS,
             allow_new_mint: false,
             platform_mint_fee: PLATFORM_MINT_FEE,
+            max_platform_mint_fee: MAX_PLATFORM_MINT_FEE,
             max_mint_per_wallet: MAX_MINT_PER_WALLET,
             min_premium_nav_ratio: MIN_PREMIUM_NAV_RATIO,
             nav_growth_rate: NAV_GROWTH_RATE,
             minting_rounds: MINTING_ROUNDS,
             next_minting_rounds: 1,
             mint_duration: DURATION,
-            bond_price: BOND_PRICE,
-            bond_maturity: BOND_MATURITY,
+            next_bond_id: 1,
         });
 
         let token_metadata = &self.token_metadata.to_account_info();
@@ -129,7 +132,7 @@ impl<'info> InitializeToken<'info> {
 }
 
 #[error_code]
-pub enum Error {
+enum Error {
     #[msg("The account that calls this function must match the token initializer.")]
     UnauthorizedGovernanceAuthority,
 }

@@ -1,16 +1,10 @@
-use crate::mint_round::{AssociatedRoundAccount, MintRound};
-use crate::{Invest, InvestBumps};
-use anchor_spl::metadata::Metadata;
-use std::ops::Div;
 use {
-    crate::state::sol_strategy::SolStrategy,
+    crate::{
+        mint_round::{MintRound},
+        state::sol_strategy::SolStrategy,
+    },
     anchor_lang::prelude::Rent,
     anchor_lang::prelude::*,
-    anchor_lang::system_program,
-    anchor_spl::{
-        associated_token::AssociatedToken,
-        token::{mint_to, Mint, MintTo, Token, TokenAccount},
-    },
 };
 
 #[derive(Accounts)]
@@ -39,7 +33,7 @@ pub struct CloseMintingRound<'info> {
 }
 
 impl<'info> CloseMintingRound<'info> {
-    pub fn handler(&mut self, bumps: &CloseMintingRoundBumps) -> Result<()> {
+    pub fn handler(&mut self, _bumps: &CloseMintingRoundBumps) -> Result<()> {
         self.sol_strategy.allow_new_mint = false;
         self.sol_strategy.next_minting_rounds += 1;
         Ok(())
@@ -47,7 +41,7 @@ impl<'info> CloseMintingRound<'info> {
 }
 
 #[error_code]
-pub enum Error {
+enum Error {
     #[msg("Caller is not the required governance authority defined in the SolStrategy.")]
     UnauthorizedGovernanceAuthority,
 

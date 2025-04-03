@@ -4,7 +4,8 @@ use anchor_lang::prelude::*;
 pub const SOLXR_DECIMAL: u8 = 9; // same as solana
 pub const GOVERNANCE_AUTHORITY: Pubkey = pubkey!("DEvurheakNvpZQAASK5Fug9LbPSMzmT7BmwAMkuiGXsU");
 pub const PLATFORM_ADDRESS: Pubkey = pubkey!("DEvurheakNvpZQAASK5Fug9LbPSMzmT7BmwAMkuiGXsU");
-pub const PLATFORM_MINT_FEE: u64 = 30000000; // 3%
+pub const PLATFORM_MINT_FEE: u64 = 30_000_000; // 3%
+pub const MAX_PLATFORM_MINT_FEE: u64 = 500_000_000; // 0.5 sol
 pub const MAX_MINT_PER_WALLET: u64 = 10_000_000_000; // 10 sol
 pub const MIN_PREMIUM_NAV_RATIO: u64 = 500_000_000; // 50% where 100% = 1 sol (1_000_000_000 lamport)
 pub const NAV_GROWTH_RATE: u64 = 100_000_000; // 10% where 100% = 1 sol (1_000_000_000 lamport)

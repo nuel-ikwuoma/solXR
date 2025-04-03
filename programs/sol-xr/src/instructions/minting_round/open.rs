@@ -1,15 +1,13 @@
-use crate::mint_round::{AssociatedRoundAccount, MintRound};
-use crate::{Invest, InvestBumps};
-use anchor_spl::metadata::Metadata;
-use std::ops::Div;
 use {
-    crate::state::sol_strategy::SolStrategy,
+    crate::{
+        mint_round::{MintRound},
+        state::sol_strategy::SolStrategy,
+    },
     anchor_lang::prelude::Rent,
     anchor_lang::prelude::*,
-    anchor_lang::system_program,
     anchor_spl::{
         associated_token::AssociatedToken,
-        token::{mint_to, Mint, MintTo, Token, TokenAccount},
+        token::{Mint, Token},
     },
 };
 
@@ -21,13 +19,6 @@ pub struct OpenMintingRound<'info> {
         constraint = sol_strategy.governance_authority.key() == governance_authority.key() @ Error::UnauthorizedGovernanceAuthority,
     )]
     pub governance_authority: Signer<'info>,
-
-    #[account(
-        mut,
-        seeds = [b"token"],
-        bump
-    )]
-    pub token: Account<'info, Mint>,
 
     #[account(
         mut,
@@ -49,6 +40,13 @@ pub struct OpenMintingRound<'info> {
     )]
     pub mint_round: Account<'info, MintRound>,
 
+    #[account(
+        mut,
+        seeds = [b"token"],
+        bump
+    )]
+    pub token: Account<'info, Mint>,
+
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
@@ -57,8 +55,8 @@ pub struct OpenMintingRound<'info> {
 impl<'info> OpenMintingRound<'info> {
     pub fn handler(
         &mut self,
-        bumps: &OpenMintingRoundBumps,
-        id: u64,
+        _bumps: &OpenMintingRoundBumps,
+        _id: u64,
         market_value: u64,
     ) -> Result<()> {
         let pass_mint_value_requirement = Self::check_mint_value_requirement(
@@ -66,7 +64,7 @@ impl<'info> OpenMintingRound<'info> {
             self.sol_strategy.min_premium_nav_ratio as u128,
             self.sol_strategy.sol_in_treasury as u128,
             self.token.supply as u128,
-        )?;
+        );
         require!(
             pass_mint_value_requirement,
             Error::MarketValueBelowMinPremium
@@ -121,17 +119,18 @@ impl<'info> OpenMintingRound<'info> {
         min_premium_nav_ratio: u128,
         sol_in_treasury_lamports: u128,
         token_supply: u128,
-    ) -> Result<bool> {
+    ) -> bool {
         let nav = sol_in_treasury_lamports * u128::pow(10, 9) / token_supply;
 
-        let min_required_value = (min_premium_nav_ratio + u128::pow(10, 9)) * nav / u128::pow(10, 9);
+        let min_required_value =
+            (min_premium_nav_ratio + u128::pow(10, 9)) * nav / u128::pow(10, 9);
 
-        Ok(market_value >= min_required_value)
+        market_value >= min_required_value
     }
 }
 
 #[error_code]
-pub enum Error {
+enum Error {
     #[msg("Caller is not the required governance authority defined in the SolStrategy.")]
     UnauthorizedGovernanceAuthority,
 

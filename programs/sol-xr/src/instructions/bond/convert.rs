@@ -1,5 +1,5 @@
 use {
-    crate::state::{bond::Bond, sol_strategy::SolStrategy},
+    crate::state::{bonds::Bond, sol_strategy::SolStrategy},
     anchor_lang::prelude::*,
     anchor_lang::system_program,
     anchor_spl::{
@@ -135,8 +135,6 @@ impl<'info> ConvertBond<'info> {
 enum Error {
     #[msg("The bond has not yet matured.")]
     BondNotMatured,
-    #[msg("Insufficient funds in the treasury to pay out the bond.")]
-    InsufficientFunds,
     #[msg("The mint authority of the bond NFT does not match the buyer.")]
     InvalidMintAuthority,
     #[msg("The token account must contain exactly 1 NFT.")]

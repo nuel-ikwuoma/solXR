@@ -1,7 +1,7 @@
 use {
     crate::{
         state::{
-            bond::{Bond, BondRecord},
+            bonds::{Bond, BondRecord},
             sol_strategy::SolStrategy,
         },
     },

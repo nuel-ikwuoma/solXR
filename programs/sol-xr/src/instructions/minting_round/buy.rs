@@ -1,9 +1,8 @@
-use crate::mint_round::{AssociatedRoundAccount, MintRound};
-use crate::{Invest, InvestBumps};
-use anchor_spl::metadata::Metadata;
-use std::ops::{Div, Mul, Sub};
 use {
-    crate::state::sol_strategy::SolStrategy,
+    crate::{
+        mint_round::{AssociatedRoundAccount, MintRound},
+        state::sol_strategy::SolStrategy,
+    },
     anchor_lang::prelude::Rent,
     anchor_lang::prelude::*,
     anchor_lang::system_program,
@@ -11,11 +10,12 @@ use {
         associated_token::AssociatedToken,
         token::{mint_to, Mint, MintTo, Token, TokenAccount},
     },
+    std::ops::{Sub},
 };
 
 #[derive(Accounts)]
 #[instruction(id: u64,amount: u64)]
-pub struct MintSolXR<'info> {
+pub struct BuySolxr<'info> {
     #[account(mut)]
     pub investor: Signer<'info>,
 
@@ -45,7 +45,7 @@ pub struct MintSolXR<'info> {
         mut,
         constraint = sol_strategy.allow_new_mint == true @ Error::MintingNotAllowed, // check if new mint is open
         constraint = sol_strategy.next_minting_rounds == id @ Error::InvalidMintingRound, // check if new mint is open
-        constraint = Self::calculate_solxr_to_mint(amount, mint_round.premium) + mint_round.solxr_minted <= mint_round.solxr_available @ Error::ExceedsAvailableSolXR, // check if amount won't go over available mint
+        constraint = Self::calculate_solxr_to_mint(amount, mint_round.premium) + mint_round.solxr_minted <= mint_round.solxr_available @ Error::ExceedsAvailableSolxr, // check if amount won't go over available mint
         constraint = amount + associated_round_account.amount_minted <= mint_round.max_mint_per_wallet @ Error::ExceedsMaxMintPerWallet, // check if user doesn't mint more than max
         constraint = Clock::get()?.unix_timestamp as u64 - mint_round.start <= sol_strategy.mint_duration  @ Error::MintingDurationEnded, // check if duration of minting is not over
         seeds = [MintRound::SEED_PREFIX,&id.to_le_bytes()],
@@ -74,8 +74,8 @@ pub struct MintSolXR<'info> {
     pub system_program: Program<'info, System>,
 }
 
-impl<'info> MintSolXR<'info> {
-    pub fn handler(&mut self, bumps: &MintSolXRBumps, id: u64, amount: u64) -> Result<()> {
+impl<'info> BuySolxr<'info> {
+    pub fn handler(&mut self, bumps: &BuySolxrBumps, _id: u64, amount: u64) -> Result<()> {
         let mut platform_fee =
             Self::calculate_platform_fee(self.sol_strategy.platform_mint_fee, amount);
         if platform_fee > self.sol_strategy.max_platform_mint_fee {
@@ -143,7 +143,7 @@ impl<'info> MintSolXR<'info> {
 }
 
 #[error_code]
-pub enum Error {
+enum Error {
     #[msg("The provided platform account doesn't match the one stored in the strategy")]
     InvalidPlatformAccount,
     #[msg("New minting is not allowed at this time")]
@@ -152,8 +152,8 @@ pub enum Error {
     InvalidMintingRound,
     #[msg("Exceeds maximum mint amount per wallet")]
     ExceedsMaxMintPerWallet,
-    #[msg("Exceeds available SolXR for minting in this round")]
-    ExceedsAvailableSolXR,
+    #[msg("Exceeds available Solxr for minting in this round")]
+    ExceedsAvailableSolxr,
     #[msg("Minting round duration has ended")]
     MintingDurationEnded,
 }

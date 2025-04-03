@@ -66,16 +66,6 @@ describe("sol-xr", async () => {
             .rpc();
     }
 
-    async function initializeNFT(governance_authority: Keypair, bondPrice: number) {
-        await program
-            .methods.initializeNft(new anchor.BN(bondPrice))
-            .accounts({
-                governanceAuthority: governance_authority.publicKey,
-            })
-            .signers([governance_authority])
-            .rpc();
-    }
-
     await it("should fail to initialize token", async () => {
         try {
             const badActor = Keypair.generate();
@@ -105,42 +95,6 @@ describe("sol-xr", async () => {
     await it('should not initialize token again', async () => {
         try {
             await initializeToken(dev, initialPoolCap, individualAddressCap)
-            expect.fail("Expected an error but the instruction succeeded");
-        } catch (error) {
-        }
-    });
-
-    await it("should fail to initialize nft", async () => {
-        try {
-            const badActor = Keypair.generate();
-            await fundAccount(badActor, 5000)
-
-            await initializeNFT(badActor, bondPrice)
-            expect.fail("Expected an error but the instruction succeeded");
-        } catch (error) {
-            let msg = error.message as string
-            expect(msg.includes('AnchorError')).true
-            expect(msg.includes('Error Code: UnauthorizedGovernanceAuthority')).true
-            expect(msg.includes('Error Number: 6000')).true
-            expect(msg.includes('Error Message: The account that calls this function must match the nft initializer.')).true
-        }
-    })
-
-    await it("should initialize nft", async () => {
-        await initializeNFT(dev, bondPrice);
-        const solStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
-        expect(solStrategy.initialPoolCap.toNumber()).equal(initialPoolCap, "initial pool cap is wrong")
-        expect(solStrategy.individualAddressCap.toNumber()).equal(individualAddressCap, "initial pool cap is wrong")
-        expect(solStrategy.bondPrice.toNumber()).equal(bondPrice, "bond price is wrong")
-        expect(solStrategy.solInTreasury.toNumber()).equal(0, "bond price is wrong")
-    })
-
-    await it('should not initialize nft again', async () => {
-        try {
-            const badActor = Keypair.generate();
-            await fundAccount(badActor, 5000)
-
-            await initializeNFT(badActor, bondPrice)
             expect.fail("Expected an error but the instruction succeeded");
         } catch (error) {
         }
@@ -400,7 +354,7 @@ describe("sol-xr", async () => {
                 params: {
                     roundID: 1,
                     amount: new anchor.BN(2_692_307_692_309), // 2_692_307_692_309 sol in lamport is 1538461538461 solxr in lamport
-                    errorCode: "ExceedsAvailableSolXR"
+                    errorCode: "ExceedsAvailableSolxr"
                 },
                 expectedValue: 0,
                 shouldSucceed: false
@@ -467,7 +421,7 @@ describe("sol-xr", async () => {
                     [Buffer.from("mint_round"), idBuffer],
                     program.programId
                 );
-                await program.methods.mintSolxr(new anchor.BN(params.roundID), new anchor.BN(params.amount))
+                await program.methods.buySolxr(new anchor.BN(params.roundID), new anchor.BN(params.amount))
                     .accounts({investor: investor.publicKey, platformAddress: platformDesignatedAccount.publicKey})
                     .signers([investor])
                     .rpc();
@@ -482,7 +436,7 @@ describe("sol-xr", async () => {
                             [Buffer.from("mint_round"), idBuffer],
                             program.programId
                         );
-                        await program.methods.mintSolxr(new anchor.BN(params.roundID), new anchor.BN(params.amount))
+                        await program.methods.buySolxr(new anchor.BN(params.roundID), new anchor.BN(params.amount))
                             .accounts({
                                 investor: investor.publicKey,
                                 platformAddress: platformDesignatedAccount.publicKey
@@ -505,7 +459,7 @@ describe("sol-xr", async () => {
                             ),
                         );
                     }
-                    await program.methods.mintSolxr(new anchor.BN(params.roundID), new anchor.BN(params.amount))
+                    await program.methods.buySolxr(new anchor.BN(params.roundID), new anchor.BN(params.amount))
                         .accounts({investor: investor.publicKey, platformAddress: platformDesignatedAccount.publicKey})
                         .signers([investor])
                         .rpc();
@@ -550,7 +504,7 @@ describe("sol-xr", async () => {
         for (const _ of list) {
             let investor = Keypair.generate()
             await fundAccount(investor, 500)
-            await program.methods.mintSolxr(new anchor.BN(roundID), new anchor.BN(maxMintPerWallet))
+            await program.methods.buySolxr(new anchor.BN(roundID), new anchor.BN(maxMintPerWallet))
                 .accounts({investor: investor.publicKey, platformAddress: platformDesignatedAccount.publicKey})
                 .signers([investor])
                 .rpc();
@@ -568,7 +522,7 @@ describe("sol-xr", async () => {
             const roundID = 1
             let lateInvestor = Keypair.generate()
             await fundAccount(lateInvestor, 500)
-            await program.methods.mintSolxr(new anchor.BN(roundID), new anchor.BN(maxMintPerWallet))
+            await program.methods.buySolxr(new anchor.BN(roundID), new anchor.BN(maxMintPerWallet))
                 .accounts({investor: lateInvestor.publicKey, platformAddress: platformDesignatedAccount.publicKey})
                 .signers([lateInvestor])
                 .rpc();
@@ -577,7 +531,7 @@ describe("sol-xr", async () => {
             let msg = error.message
             console.log(msg)
             expect(msg.includes('AnchorError')).true
-            expect(msg.includes('Error Code: ExceedsAvailableSolXR')).true
+            expect(msg.includes('Error Code: ExceedsAvailableSolxr')).true
         }
     });
 
@@ -630,7 +584,7 @@ describe("sol-xr", async () => {
             let lateInvestor = Keypair.generate()
             await fundAccount(lateInvestor, 500)
 
-            await program.methods.mintSolxr(new anchor.BN(1), new anchor.BN(maxMintPerWallet))
+            await program.methods.buySolxr(new anchor.BN(1), new anchor.BN(maxMintPerWallet))
                 .accounts({investor: lateInvestor.publicKey, platformAddress: platformDesignatedAccount.publicKey})
                 .signers([lateInvestor])
                 .rpc();
@@ -653,7 +607,7 @@ describe("sol-xr", async () => {
             let lateInvestor = Keypair.generate()
             await fundAccount(lateInvestor, 500)
 
-            await program.methods.mintSolxr(new anchor.BN(1), new anchor.BN(maxMintPerWallet))
+            await program.methods.buySolxr(new anchor.BN(1), new anchor.BN(maxMintPerWallet))
                 .accounts({investor: lateInvestor.publicKey, platformAddress: platformDesignatedAccount.publicKey})
                 .signers([lateInvestor])
                 .rpc();

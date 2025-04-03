@@ -84,7 +84,7 @@ impl<'info> Invest<'info> {
 }
 
 #[error_code]
-pub enum Error {
+enum Error {
     #[msg("The amount would cause the ATA balance to exceed the individual address cap.")]
     ATACapError,
     #[msg("The amount would cause the program PDA to exceed the initial pool cap.")]

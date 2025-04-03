@@ -1,3 +1,3 @@
 pub mod sol_strategy;
-mod bond;
+pub mod bonds;
 pub mod mint_round;
