@@ -62,12 +62,15 @@ impl<'info> OpenMintingRound<'info> {
         market_value: u64,
     ) -> Result<()> {
         let pass_mint_value_requirement = Self::check_mint_value_requirement(
-            market_value,
-            self.sol_strategy.min_premium_nav_ratio,
-            self.sol_strategy.sol_in_treasury,
-            self.token.supply,
+            market_value as u128,
+            self.sol_strategy.min_premium_nav_ratio as u128,
+            self.sol_strategy.sol_in_treasury as u128,
+            self.token.supply as u128,
         )?;
-        require!(pass_mint_value_requirement, Error::MarketValueBelowMinPremium);
+        require!(
+            pass_mint_value_requirement,
+            Error::MarketValueBelowMinPremium
+        );
 
         self.sol_strategy.allow_new_mint = true;
 
@@ -75,53 +78,57 @@ impl<'info> OpenMintingRound<'info> {
         self.mint_round.max_mint_per_wallet = self.sol_strategy.max_mint_per_wallet;
         self.mint_round.solxr_minted = 0;
         self.mint_round.solxr_available = Self::calculate_solxr_to_mint(
-            self.sol_strategy.nav_growth_rate,
-            self.token.supply,
-            market_value,
-            self.sol_strategy.sol_in_treasury,
+            self.sol_strategy.nav_growth_rate as u128,
+            self.token.supply as u128,
+            market_value as u128,
+            self.sol_strategy.sol_in_treasury as u128,
         )?;
         self.mint_round.start = Clock::get()?.unix_timestamp as u64;
         Ok(())
     }
 
     fn calculate_solxr_to_mint(
-        nav_growth_rate: u64,
-        solxr_supply: u64,
-        market_value: u64,
-        sol_in_treasury_lamports: u64,
+        nav_growth_rate: u128,
+        solxr_supply: u128,
+        market_value: u128,
+        sol_in_treasury_lamports: u128,
     ) -> Result<u64> {
-        let nav_growth_rate_decimal = (nav_growth_rate as u128) * (u128::pow(10, 9)) / 1_000_000_000;
-        let nav = (sol_in_treasury_lamports as u128) * (u128::pow(10, 9)) / (solxr_supply as u128);
+        let nav = sol_in_treasury_lamports * u128::pow(10, 9) / solxr_supply;
         require!(nav != 0, Error::NavIsZero);
-        let market_value_ratio = (market_value as u128) * (u128::pow(10, 9)) / (nav as u128);
+
+        let market_value_ratio = market_value * u128::pow(10, 9) / nav;
         require!(
-        market_value_ratio > (u128::pow(10, 9) + nav_growth_rate_decimal),
-        Error::MarketValueInsufficientForFormula
-    );
-        let denominator = market_value_ratio - u128::pow(10, 9) - nav_growth_rate_decimal;
-        require!(denominator != 0, Error::MarketValueAtTargetNav); // todo: test market value at target nav
-        let numerator = nav_growth_rate_decimal * (solxr_supply as u128);
+            market_value_ratio > u128::pow(10, 9) + nav_growth_rate,
+            Error::MarketValueInsufficientForFormula
+        );
+
+        let denominator = market_value_ratio - u128::pow(10, 9) - nav_growth_rate;
+        require!(denominator != 0, Error::MarketValueAtTargetNav);
+
+        let numerator = nav_growth_rate * solxr_supply;
 
         let result = numerator / denominator;
-        require!(result <= u64::MAX as u128, Error::CalculatedMintableOverflow);
+        require!(
+            result <= u64::MAX as u128,
+            Error::CalculatedMintableOverflow
+        );
+
         Ok(result as u64)
     }
 
     fn check_mint_value_requirement(
-        market_value: u64,
-        min_premium_nav_ratio: u64,
-        sol_in_treasury_lamports: u64,
-        token_supply: u64,
+        market_value: u128,
+        min_premium_nav_ratio: u128,
+        sol_in_treasury_lamports: u128,
+        token_supply: u128,
     ) -> Result<bool> {
-        let min_premium_decimal = (min_premium_nav_ratio as u128) * (u128::pow(10, 9)) / 1_000_000_000;
-        require!(token_supply != 0, Error::TokenSupplyIsZero);
-        let nav = (sol_in_treasury_lamports as u128) * (u128::pow(10, 9)) / (token_supply as u128);
-        let min_required_value = (min_premium_decimal + u128::pow(10, 9)) * nav / u128::pow(10, 9);
-        let result = market_value as u128 >= min_required_value;
-        Ok(result)
+        let nav = sol_in_treasury_lamports * u128::pow(10, 9) / token_supply;
+
+        let min_required_value = (min_premium_nav_ratio + u128::pow(10, 9)) * nav / u128::pow(10, 9);
+
+        Ok(market_value >= min_required_value)
     }
 }
-
 
 #[error_code]
 pub enum Error {
@@ -131,7 +138,9 @@ pub enum Error {
     #[msg("Cannot open a new round because `allow_new_mint` is already true in SolStrategy.")]
     MintingAlreadyAllowed,
 
-    #[msg("The provided round ID does not match the expected `next_minting_rounds` in SolStrategy.")]
+    #[msg(
+        "The provided round ID does not match the expected `next_minting_rounds` in SolStrategy."
+    )]
     IncorrectRoundId,
 
     #[msg("Cannot open round: The next round ID exceeds the total number of rounds planned.")]
@@ -149,7 +158,9 @@ pub enum Error {
     #[msg("Calculation failed: Market value equals target NAV threshold, resulting in zero denominator.")]
     MarketValueAtTargetNav,
 
-    #[msg("Calculation failed: Resulting SOLXR available to mint exceeds maximum value (u64::MAX).")]
+    #[msg(
+        "Calculation failed: Resulting SOLXR available to mint exceeds maximum value (u64::MAX)."
+    )]
     CalculatedMintableOverflow,
 
     #[msg("Calculation failed: Market value to NAV ratio must exceed (1 + NAV growth rate) for formula.")]

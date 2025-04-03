@@ -76,8 +76,11 @@ pub struct MintSolXR<'info> {
 
 impl<'info> MintSolXR<'info> {
     pub fn handler(&mut self, bumps: &MintSolXRBumps, id: u64, amount: u64) -> Result<()> {
-        let platform_fee =
+        let mut platform_fee =
             Self::calculate_platform_fee(self.sol_strategy.platform_mint_fee, amount);
+        if platform_fee > self.sol_strategy.max_platform_mint_fee {
+            platform_fee = self.sol_strategy.max_platform_mint_fee;
+        }
 
         // Transfer SOL to platform designated account
         system_program::transfer(
@@ -104,6 +107,7 @@ impl<'info> MintSolXR<'info> {
         )?;
         let solxr_to_mint =
             Self::calculate_solxr_to_mint(amount - platform_fee, self.mint_round.premium);
+
         // Mint token for payer
         // Get the bump for the mint authority PDA
         let mint_auth_bump = bumps.sol_strategy;
@@ -119,7 +123,7 @@ impl<'info> MintSolXR<'info> {
                     authority: self.sol_strategy.to_account_info(),
                 },
             )
-                .with_signer(mint_auth_signer),
+            .with_signer(mint_auth_signer),
             solxr_to_mint,
         )?;
 
@@ -129,11 +133,11 @@ impl<'info> MintSolXR<'info> {
     }
 
     fn calculate_platform_fee(platform_mint_fee: u64, amount: u64) -> u64 {
-        let fee = ((platform_mint_fee as u128) * (amount as u128)) / u128::pow(10, 9);
+        let fee = platform_mint_fee as u128 * amount as u128 / u128::pow(10, 9);
         fee as u64
     }
     fn calculate_solxr_to_mint(amount: u64, premium: u64) -> u64 {
-        let value = ((amount as u128) * (u128::pow(10, 9))) / (premium as u128);
+        let value = amount as u128 * u128::pow(10, 9) / premium as u128;
         value as u64
     }
 }
