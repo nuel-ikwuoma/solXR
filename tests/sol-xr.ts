@@ -1,20 +1,21 @@
 import {describe, it} from 'node:test';
 import * as anchor from '@coral-xyz/anchor';
-import {
-    Keypair,
-    LAMPORTS_PER_SOL,
-    PublicKey,
-    SystemProgram,
-    Transaction,
-    Connection
-} from '@solana/web3.js';
+import {Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction} from '@solana/web3.js';
 import {BankrunProvider} from 'anchor-bankrun';
 import {Clock, startAnchor} from 'solana-bankrun';
 import {SolXr} from "../target/types/sol_xr";
 import {expect,} from "chai";
 import devKey from '../dev.json'
 import {getAccount, getAssociatedTokenAddress, getMint} from '@solana/spl-token'
-const { ComputeBudgetProgram } = require('@solana/web3.js');
+import {
+    deserializeEdition,
+    deserializeMasterEdition,
+    Edition,
+    MasterEdition
+} from '@metaplex-foundation/mpl-token-metadata';
+import {lamports, PublicKey as MTPublicKey} from '@metaplex-foundation/umi';
+
+const {ComputeBudgetProgram} = require('@solana/web3.js');
 
 const IDL = require('../target/idl/sol_xr.json');
 const PROGRAM_ID = new PublicKey(IDL.address);
@@ -32,12 +33,12 @@ describe("sol-xr", async () => {
 
     const provider = new BankrunProvider(context);
     const providerKeypair = provider.wallet as anchor.Wallet;
+    // const metaplex = Metaplex.make(provider.connection);
     const program = new anchor.Program<SolXr>(IDL, provider);
 
     const initialPoolCap = 10_000 * LAMPORTS_PER_SOL;
     const individualAddressCap = 100 * LAMPORTS_PER_SOL;
     const maxMintPerWallet = 10 * LAMPORTS_PER_SOL;
-    const bondPrice = LAMPORTS_PER_SOL;
 
     // Generate a new keypair for the governance_authority
     const dev = Keypair.fromSecretKey(new Uint8Array(devKey));
@@ -83,7 +84,6 @@ describe("sol-xr", async () => {
     })
 
     await it("should initialize token", async () => {
-        console.log(dev.publicKey)
         await initializeToken(dev, initialPoolCap, individualAddressCap);
         const solStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
         expect(solStrategy.initialPoolCap.toNumber()).equal(initialPoolCap, "initial pool cap is wrong")
@@ -666,9 +666,9 @@ describe("sol-xr", async () => {
         const symbol = "B#1";
         const uri = "https://bafybeiauoz3l4ssofopdg36a4teo5at6paavgjzvyhcyr5e4bvk5fwqlpy.ipfs.w3s.link/metadata.json";
         const maturity = new anchor.BN(now + 3600); // 1 hour from now
-        const strike_price = new anchor.BN(1_500_000_000);
-        const supply = new anchor.BN(1);
-        const price = new anchor.BN(10_000_000_000);
+        const strike_price = new anchor.BN(1.5 * LAMPORTS_PER_SOL);
+        const supply = new anchor.BN(2);
+        const price = new anchor.BN(10 * LAMPORTS_PER_SOL);
         const maxMintPerWallet = new anchor.BN(1);
         const startTime = new anchor.BN(now);
         const endTime = new anchor.BN(now + 600);
@@ -702,7 +702,8 @@ describe("sol-xr", async () => {
             program.programId
         );
         const bondNFT = await getMint(program.provider.connection, bondNFTPDA);
-        console.log(bondNFT)
+
+        const edition = await getMasterEdition(bondNFTPDA);
 
         expect(bond.maturity.toNumber()).equal(maturity.toNumber());
         expect(bond.strikePrice.toNumber()).equal(strike_price.toNumber());
@@ -712,12 +713,26 @@ describe("sol-xr", async () => {
         expect(bond.startTime.toNumber()).equal(startTime.toNumber());
         expect(bond.endTime.toNumber()).equal(endTime.toNumber());
         expect(bond.nextEditionNumber.toNumber()).equal(1);
+        expect(bond.nextEditionNumber.toNumber()).equal(1);
+        expect(Number(edition.supply)).equal(0);
+        if (edition.maxSupply.__option === 'Some') {
+            const maxSupplyValue = edition.maxSupply.value;
+            expect(Number(maxSupplyValue)).equal(2);
+        } else {
+            expect.fail("The supply should be 2");
+        }
     });
 
     await it("should mint bond nft", async () => {
-            const buyer = Keypair.generate();
-            await fundAccount(buyer, 5000)
+            const firstBuyer = Keypair.generate();
+            await fundAccount(firstBuyer, 5000)
+            const secondBuyer = Keypair.generate();
+            await fundAccount(secondBuyer, 5000)
+            const lateBuyer = Keypair.generate();
+            await fundAccount(lateBuyer, 5000)
+
             const solStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
+
             const idBuffer = Buffer.alloc(8);
             idBuffer.writeBigUInt64LE(BigInt(solStrategy.nextBondId.toNumber() - 1));
             const [bondPDA] = PublicKey.findProgramAddressSync(
@@ -729,42 +744,99 @@ describe("sol-xr", async () => {
                 [bondPDA.toBuffer()],
                 program.programId
             );
-            const bondNFT = await getMint(program.provider.connection, bondNFTPDA);
-            console.log(bondNFT)
-            const bondTokenAccount = await getAssociatedTokenAddress(bondNFTPDA, solStrategyPDA, true);
-            const bondTokenAccountInfo = await getAccount(program.provider.connection, bondTokenAccount);
-            console.log("Bond token account balance:", bondTokenAccountInfo);
+            const [bondEditionPDA] = PublicKey.findProgramAddressSync(
+                [
+                    Buffer.from('metadata'),
+                    METADATA_PROGRAM_ID.toBuffer(),
+                    bondNFTPDA.toBuffer(),
+                    Buffer.from('edition')
+                ],
+                METADATA_PROGRAM_ID
+            );
+
+
             const testCases = [
                 {
                     desc: "buying has not started",
+                    buyer: firstBuyer,
                     params: {
                         errorCode: "MintingNotStarted"
                     },
-                    expectedValue: 0,
+                    expectedValue: {},
                     shouldSucceed: false,
                     time: bond.startTime.toNumber() - 3600,
                 },
                 {
                     desc: "buying has ended",
+                    buyer: firstBuyer,
                     params: {
                         errorCode: "MintingEnded"
                     },
-                    expectedValue: 0,
+                    expectedValue: {},
                     shouldSucceed: false,
                     time: bond.startTime.toNumber() + 601,
                 },
                 {
                     desc: "buy",
+                    buyer: firstBuyer,
                     params: {
-                        errorCode: "MintingEnded"
+                        errorCode: null
                     },
-                    expectedValue: 0,
+                    expectedValue: {
+                        nextEditionNumber: 2,
+                        nextEditionMarker: "0",
+                        solFromBond: bond.price.toNumber(),
+                    },
                     shouldSucceed: true,
                     time: bond.startTime.toNumber(),
                 },
+                {
+                    desc: "buy again",
+                    buyer: firstBuyer,
+                    params: {
+                        errorCode: "MaxMintPerWalletReached"
+                    },
+                    expectedValue: {
+                        nextEditionNumber: 2,
+                        nextEditionMarker: "0",
+                        solFromBond: bond.price.toNumber(),
+                    },
+                    shouldSucceed: false,
+                    time: 0,
+                },
+                {
+                    desc: "another buyer",
+                    buyer: secondBuyer,
+                    params: {
+                        errorCode: null
+                    },
+                    expectedValue: {
+                        nextEditionNumber: 3,
+                        nextEditionMarker: "0",
+                        solFromBond: bond.price.toNumber() * 2,
+                    },
+                    shouldSucceed: true,
+                    time: 0,
+                },
+                {
+                    desc: "supply is finished",
+                    buyer: lateBuyer,
+                    params: {
+                        errorCode: "MaxSupplyReached"
+                    },
+                    expectedValue: {
+                        nextEditionNumber: 4,
+                        nextEditionMarker: "0",
+                        solFromBond: bond.price.toNumber(),
+                    },
+                    shouldSucceed: false,
+                    time: 0,
+                },
             ]
-            for (const {desc, params, shouldSucceed, expectedValue, time} of testCases) {
+            for (const {desc, params, shouldSucceed, expectedValue, time, buyer} of testCases) {
                 console.log(`when ${desc}`)
+
+
                 if (time > 0) {
                     const currentClock = await provider.context.banksClient.getClock();
                     provider.context.setClock(
@@ -789,17 +861,41 @@ describe("sol-xr", async () => {
                     tx.add(
                         await program.methods
                             .buyBond(new anchor.BN(solStrategy.nextBondId.toNumber() - 1))
-                            .accounts({ buyer: buyer.publicKey })
-                            .instruction() // Use .instruction() instead of .rpc() to add it to a transaction
+                            .accounts({buyer: buyer.publicKey})
+                            .instruction()
                     );
                     await provider.sendAndConfirm(tx, [buyer]);
-                    const [bondNFTPDA] = PublicKey.findProgramAddressSync(
-                        [bondPDA.toBuffer()],
+
+                    const newSolStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
+
+                    const bond = await program.account.bond.fetch(bondPDA)
+
+                    const [bondRecordPDA] = PublicKey.findProgramAddressSync(
+                        [Buffer.from("bond_record"), bondPDA.toBuffer(), buyer.publicKey.toBuffer()],
                         program.programId
                     );
-                    const bondNFT = await getMint(program.provider.connection, bondNFTPDA);
-                    console.log(bondNFT)
+                    const bondRecord = await program.account.bondRecord.fetch(bondRecordPDA)
 
+                    const editionBuffer = Buffer.alloc(8);
+                    editionBuffer.writeBigUInt64LE(BigInt(bond.nextEditionNumber.toNumber() - 1));
+                    const [buyerBondNFTPDA] = PublicKey.findProgramAddressSync(
+                        [bondPDA.toBuffer(), editionBuffer],
+                        program.programId
+                    );
+                    const buyerBondTokenAccount = await getAssociatedTokenAddress(buyerBondNFTPDA, buyer.publicKey);
+                    const buyerBondTokenAccountInfo = await getAccount(program.provider.connection, buyerBondTokenAccount);
+
+                    let edition = await getEdition(buyerBondNFTPDA)
+
+                    expect(bond.nextEditionNumber.toNumber()).equal(expectedValue.nextEditionNumber, `next edition number should be ${expectedValue.nextEditionNumber}`)
+                    expect(bond.nextEditionMarker).equal(expectedValue.nextEditionMarker, `next edition marker should be ${expectedValue.nextEditionMarker}`)
+                    expect(newSolStrategy.solFromBond.toNumber()).equal(expectedValue.solFromBond, `sol made from bond should be ${expectedValue.solFromBond}`)
+                    expect(bondRecord.collection.toBase58()).equal(bondPDA.toBase58(), `collection should be the bond public key`)
+                    expect(bondRecord.user.toBase58()).equal(buyer.publicKey.toBase58(), `user should be the buyer public key`)
+                    expect(bondRecord.minted.toNumber()).equal(1, `minted should be 1`)
+                    expect(Number(buyerBondTokenAccountInfo.amount)).equal(1, `buyer bond nft account amount should be 1`)
+                    expect(Number(edition.edition)).equal(expectedValue.nextEditionNumber - 1, `edition of mint edition should be ${expectedValue.nextEditionNumber - 1}`)
+                    expect(edition.parent).equal(bondEditionPDA.toBase58(), `parent of mint edition should be ${bondNFTPDA.toBase58()}`)
                 } else {
                     try {
                         await program.methods.buyBond(new anchor.BN(solStrategy.nextBondId.toNumber() - 1))
@@ -818,6 +914,57 @@ describe("sol-xr", async () => {
             }
         }
     )
+
+    async function getMasterEdition(mintAddress: PublicKey): Promise<MasterEdition> {
+        // Get master edition PDA
+        const [editionPDA] = PublicKey.findProgramAddressSync(
+            [
+                Buffer.from('metadata'),
+                METADATA_PROGRAM_ID.toBuffer(),
+                mintAddress.toBuffer(),
+                Buffer.from('edition')
+            ],
+            METADATA_PROGRAM_ID
+        );
+        // Fetch the accounts
+        const editionAccountInfo = await provider.connection.getAccountInfo(editionPDA);
+
+
+        return deserializeMasterEdition({
+            executable: editionAccountInfo.executable,
+            rentEpoch: BigInt(editionAccountInfo.rentEpoch),
+            lamports: lamports(editionAccountInfo.lamports),
+            owner: editionAccountInfo.owner.toBase58() as MTPublicKey,
+            data: editionAccountInfo.data,
+            publicKey: editionPDA.toBase58() as MTPublicKey
+        })
+    }
+
+    async function getEdition(mintAddress: PublicKey): Promise<Edition> {
+        // Get master edition PDA
+        const [editionPDA] = PublicKey.findProgramAddressSync(
+            [
+                Buffer.from('metadata'),
+                METADATA_PROGRAM_ID.toBuffer(),
+                mintAddress.toBuffer(),
+                Buffer.from('edition')
+            ],
+            METADATA_PROGRAM_ID
+        );
+        // Fetch the accounts
+        const editionAccountInfo = await provider.connection.getAccountInfo(editionPDA);
+
+        return deserializeEdition({
+            executable: editionAccountInfo.executable,
+            rentEpoch: BigInt(editionAccountInfo.rentEpoch),
+            lamports: lamports(editionAccountInfo.lamports),
+            owner: editionAccountInfo.owner.toBase58() as MTPublicKey,
+            data: editionAccountInfo.data,
+            publicKey: editionPDA.toBase58() as MTPublicKey
+        })
+    }
+
+    // todo: test convert after transfer
 
     async function fundAccount(keyPair: Keypair, amount: number) {
         const instruction = SystemProgram.transfer({
