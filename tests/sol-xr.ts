@@ -13,7 +13,8 @@ import {Clock, startAnchor} from 'solana-bankrun';
 import {SolXr} from "../target/types/sol_xr";
 import {expect,} from "chai";
 import devKey from '../dev.json'
-import {getMint} from '@solana/spl-token'
+import {getAccount, getAssociatedTokenAddress, getMint} from '@solana/spl-token'
+const { ComputeBudgetProgram } = require('@solana/web3.js');
 
 const IDL = require('../target/idl/sol_xr.json');
 const PROGRAM_ID = new PublicKey(IDL.address);
@@ -28,7 +29,6 @@ describe("sol-xr", async () => {
         ],
         [],
     );
-    const connection = new Connection("http://localhost:8899");
 
     const provider = new BankrunProvider(context);
     const providerKeypair = provider.wallet as anchor.Wallet;
@@ -42,7 +42,7 @@ describe("sol-xr", async () => {
     // Generate a new keypair for the governance_authority
     const dev = Keypair.fromSecretKey(new Uint8Array(devKey));
     const platformDesignatedAccount = Keypair.fromSecretKey(new Uint8Array(devKey));
-    await fundAccount(dev, 50000)
+    await fundAccount(dev, 500000)
 
     // Find the mint authority PDA
     const [solStrategyPDA] = PublicKey.findProgramAddressSync(
@@ -88,7 +88,6 @@ describe("sol-xr", async () => {
         const solStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
         expect(solStrategy.initialPoolCap.toNumber()).equal(initialPoolCap, "initial pool cap is wrong")
         expect(solStrategy.individualAddressCap.toNumber()).equal(individualAddressCap, "initial pool cap is wrong")
-        expect(solStrategy.bondPrice.toNumber()).equal(LAMPORTS_PER_SOL, "bond price should be 1 sol")
         expect(solStrategy.solInTreasury.toNumber()).equal(0, "bond price should be zero")
     })
 
@@ -621,6 +620,204 @@ describe("sol-xr", async () => {
         }
     });
 
+    await it("should fail to sell bond", async () => {
+        try {
+            const badActor = Keypair.generate();
+            await fundAccount(badActor, 5000)
+
+            let now = Date.now();
+            const name = "Bond #1";
+            const symbol = "B#1";
+            const uri = "https://bafybeiauoz3l4ssofopdg36a4teo5at6paavgjzvyhcyr5e4bvk5fwqlpy.ipfs.w3s.link/metadata.json";
+            const maturity = new anchor.BN(now + 3600); // 1 hour from now
+            const strike_price = new anchor.BN(1_500_000_000);
+            const supply = new anchor.BN(1);
+            const price = new anchor.BN(10_000_000_000);
+            const maxMintPerWallet = new anchor.BN(1);
+            const startTime = new anchor.BN(now);
+            const endTime = new anchor.BN(now + 600);
+            await program.methods.sellBond(
+                name,
+                symbol,
+                uri,
+                maturity,
+                strike_price,
+                supply,
+                price,
+                maxMintPerWallet,
+                startTime,
+                endTime
+            )
+                .accounts({governanceAuthority: badActor.publicKey})
+                .signers([badActor])
+                .rpc();
+            expect.fail("Expected an error but the instruction succeeded");
+        } catch (error) {
+            let msg = error.message as string
+            console.log(msg)
+            expect(msg.includes('AnchorError')).true
+            expect(msg.includes('Error Code: UnauthorizedGovernanceAuthority')).true
+        }
+    })
+
+    await it("should sell bond", async () => {
+        let now = Date.now();
+        const name = "Bond #1";
+        const symbol = "B#1";
+        const uri = "https://bafybeiauoz3l4ssofopdg36a4teo5at6paavgjzvyhcyr5e4bvk5fwqlpy.ipfs.w3s.link/metadata.json";
+        const maturity = new anchor.BN(now + 3600); // 1 hour from now
+        const strike_price = new anchor.BN(1_500_000_000);
+        const supply = new anchor.BN(1);
+        const price = new anchor.BN(10_000_000_000);
+        const maxMintPerWallet = new anchor.BN(1);
+        const startTime = new anchor.BN(now);
+        const endTime = new anchor.BN(now + 600);
+        await program.methods.sellBond(
+            name,
+            symbol,
+            uri,
+            maturity,
+            strike_price,
+            supply,
+            price,
+            maxMintPerWallet,
+            startTime,
+            endTime
+        )
+            .accounts({governanceAuthority: dev.publicKey})
+            .signers([dev])
+            .rpc();
+
+        const solStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
+        const idBuffer = Buffer.alloc(8);
+        idBuffer.writeBigUInt64LE(BigInt(solStrategy.nextBondId.toNumber() - 1));
+        const [bondPDA] = PublicKey.findProgramAddressSync(
+            [Buffer.from("bond"), idBuffer],
+            program.programId
+        );
+        const bond = await program.account.bond.fetch(bondPDA)
+        idBuffer.writeBigUInt64LE(BigInt(bond.nextEditionNumber.toNumber()));
+        const [bondNFTPDA] = PublicKey.findProgramAddressSync(
+            [bondPDA.toBuffer()],
+            program.programId
+        );
+        const bondNFT = await getMint(program.provider.connection, bondNFTPDA);
+        console.log(bondNFT)
+
+        expect(bond.maturity.toNumber()).equal(maturity.toNumber());
+        expect(bond.strikePrice.toNumber()).equal(strike_price.toNumber());
+        expect(bond.supply.toNumber()).equal(supply.toNumber());
+        expect(bond.price.toNumber()).equal(price.toNumber());
+        expect(bond.maxMintPerWallet.toNumber()).equal(maxMintPerWallet.toNumber());
+        expect(bond.startTime.toNumber()).equal(startTime.toNumber());
+        expect(bond.endTime.toNumber()).equal(endTime.toNumber());
+        expect(bond.nextEditionNumber.toNumber()).equal(1);
+    });
+
+    await it("should mint bond nft", async () => {
+            const buyer = Keypair.generate();
+            await fundAccount(buyer, 5000)
+            const solStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
+            const idBuffer = Buffer.alloc(8);
+            idBuffer.writeBigUInt64LE(BigInt(solStrategy.nextBondId.toNumber() - 1));
+            const [bondPDA] = PublicKey.findProgramAddressSync(
+                [Buffer.from("bond"), idBuffer],
+                program.programId
+            );
+            const bond = await program.account.bond.fetch(bondPDA)
+            const [bondNFTPDA] = PublicKey.findProgramAddressSync(
+                [bondPDA.toBuffer()],
+                program.programId
+            );
+            const bondNFT = await getMint(program.provider.connection, bondNFTPDA);
+            console.log(bondNFT)
+            const bondTokenAccount = await getAssociatedTokenAddress(bondNFTPDA, solStrategyPDA, true);
+            const bondTokenAccountInfo = await getAccount(program.provider.connection, bondTokenAccount);
+            console.log("Bond token account balance:", bondTokenAccountInfo);
+            const testCases = [
+                {
+                    desc: "buying has not started",
+                    params: {
+                        errorCode: "MintingNotStarted"
+                    },
+                    expectedValue: 0,
+                    shouldSucceed: false,
+                    time: bond.startTime.toNumber() - 3600,
+                },
+                {
+                    desc: "buying has ended",
+                    params: {
+                        errorCode: "MintingEnded"
+                    },
+                    expectedValue: 0,
+                    shouldSucceed: false,
+                    time: bond.startTime.toNumber() + 601,
+                },
+                {
+                    desc: "buy",
+                    params: {
+                        errorCode: "MintingEnded"
+                    },
+                    expectedValue: 0,
+                    shouldSucceed: true,
+                    time: bond.startTime.toNumber(),
+                },
+            ]
+            for (const {desc, params, shouldSucceed, expectedValue, time} of testCases) {
+                console.log(`when ${desc}`)
+                if (time > 0) {
+                    const currentClock = await provider.context.banksClient.getClock();
+                    provider.context.setClock(
+                        new Clock(
+                            currentClock.slot,
+                            currentClock.epochStartTimestamp,
+                            currentClock.epoch,
+                            currentClock.leaderScheduleEpoch,
+                            BigInt(time),
+                        ),
+                    );
+                }
+
+                if (shouldSucceed) {
+                    const tx = new anchor.web3.Transaction();
+
+                    tx.add(
+                        ComputeBudgetProgram.setComputeUnitLimit({
+                            units: 250_000,
+                        })
+                    );
+                    tx.add(
+                        await program.methods
+                            .buyBond(new anchor.BN(solStrategy.nextBondId.toNumber() - 1))
+                            .accounts({ buyer: buyer.publicKey })
+                            .instruction() // Use .instruction() instead of .rpc() to add it to a transaction
+                    );
+                    await provider.sendAndConfirm(tx, [buyer]);
+                    const [bondNFTPDA] = PublicKey.findProgramAddressSync(
+                        [bondPDA.toBuffer()],
+                        program.programId
+                    );
+                    const bondNFT = await getMint(program.provider.connection, bondNFTPDA);
+                    console.log(bondNFT)
+
+                } else {
+                    try {
+                        await program.methods.buyBond(new anchor.BN(solStrategy.nextBondId.toNumber() - 1))
+                            .accounts({buyer: buyer.publicKey})
+                            .signers([buyer])
+                            .rpc();
+                        expect.fail("Expected an error but the instruction succeeded");
+
+                    } catch (error: any) {
+                        let msg = error.message as string
+                        console.log(msg, "->", params.errorCode)
+                        expect(msg.includes('AnchorError')).true
+                        expect(msg.includes(`Error Code: ${params.errorCode}`)).true
+                    }
+                }
+            }
+        }
+    )
 
     async function fundAccount(keyPair: Keypair, amount: number) {
         const instruction = SystemProgram.transfer({

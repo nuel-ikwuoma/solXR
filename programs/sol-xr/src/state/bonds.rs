@@ -12,6 +12,8 @@ pub struct Bond {
     pub start_time: u64,
     pub end_time: u64,
     pub next_edition_number: u64,
+    #[max_len(248)]
+    pub next_edition_marker: String,
 }
 
 impl Bond {

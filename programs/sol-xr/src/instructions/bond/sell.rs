@@ -1,7 +1,5 @@
 use {
-    crate::{
-        state::{bonds::Bond, sol_strategy::SolStrategy},
-    },
+    crate::state::{bonds::Bond, sol_strategy::SolStrategy},
     anchor_lang::prelude::*,
     anchor_spl::{
         associated_token::AssociatedToken,
@@ -63,10 +61,20 @@ pub struct SellBond<'info> {
     )]
     pub bond_token_account: Account<'info, TokenAccount>,
     /// CHECK: Validated by PDA derivation
-    #[account(mut)]
+    #[account(
+        mut,
+        seeds = [b"metadata", metadata_program.key().as_ref(), bond_nft.key().as_ref()],
+        bump,
+        seeds::program = metadata_program.key(),
+    )]
     pub bond_metadata: UncheckedAccount<'info>,
     /// CHECK: Validated by PDA derivation
-    #[account(mut)]
+    #[account(
+        mut,
+        seeds = [b"metadata", metadata_program.key().as_ref(), bond_nft.key().as_ref(),b"edition"],
+        bump,
+        seeds::program = metadata_program.key(),
+    )]
     pub bond_edition: UncheckedAccount<'info>,
 
     pub metadata_program: Program<'info, Metadata>,
@@ -99,7 +107,8 @@ impl<'info> SellBond<'info> {
             max_mint_per_wallet,
             start_time,
             end_time,
-            next_edition_number: 1,
+            next_edition_number: 1u64,
+            next_edition_marker: (1 / 248).to_string(),
         });
 
         let mint_auth_bump = bumps.sol_strategy;
@@ -108,7 +117,7 @@ impl<'info> SellBond<'info> {
 
         let nft_metadata = &self.bond_metadata.to_account_info();
         let master_edition = &self.bond_edition.to_account_info();
-        let bond = &self.bond.to_account_info();
+        let bond_nft = &self.bond_nft.to_account_info();
         let authority = &self.sol_strategy.to_account_info();
         let payer = &self.governance_authority.to_account_info();
         let system_program = &self.system_program.to_account_info();
@@ -120,7 +129,7 @@ impl<'info> SellBond<'info> {
         let mint_cpi = CpiContext::new_with_signer(
             token_program.clone(),
             MintTo {
-                mint: bond.clone(),
+                mint: bond_nft.clone(),
                 to: self.bond_token_account.to_account_info(),
                 authority: authority.clone(),
             },
@@ -133,7 +142,7 @@ impl<'info> SellBond<'info> {
             metadata_program,
             CreateMetadataAccountV3CpiAccounts {
                 metadata: nft_metadata,
-                mint: bond,
+                mint: bond_nft,
                 mint_authority: authority,
                 payer,
                 update_authority: (authority, true),
@@ -163,7 +172,7 @@ impl<'info> SellBond<'info> {
                 edition: master_edition,
                 update_authority: authority,
                 mint_authority: authority,
-                mint: bond,
+                mint: bond_nft,
                 payer,
                 metadata: nft_metadata,
                 token_program,

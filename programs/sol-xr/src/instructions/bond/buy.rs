@@ -72,10 +72,20 @@ pub struct BuyBond<'info> {
     )]
     pub buyer_token_account: Account<'info, TokenAccount>,
     /// CHECK: Buyer Bond Metadata account of the master edition NFT. Validated by derivation by MPL program.
-    #[account(mut)]
+    #[account(
+        mut,
+        seeds = [b"metadata", metadata_program.key().as_ref(), buyer_bond_nft.key().as_ref()],
+        bump,
+        seeds::program = metadata_program.key(),
+    )]
     pub buyer_metadata: AccountInfo<'info>,
     /// CHECK: Buyer Bond Edition of the master edition NFT. Validated by derivation by MPL program.
-    #[account(mut)]
+    #[account(
+        mut,
+        seeds = [b"metadata", metadata_program.key().as_ref(), buyer_bond_nft.key().as_ref(), b"edition"],
+        bump,
+        seeds::program = metadata_program.key(),
+    )]
     pub buyer_edition: AccountInfo<'info>,
 
     #[account(
@@ -90,13 +100,28 @@ pub struct BuyBond<'info> {
     )]
     pub bond_token_account: Account<'info, TokenAccount>,
     /// CHECK: Bond Metadata account of the master edition NFT. Validated by derivation by MPL program.
-    #[account(mut)]
+    #[account(
+        mut,
+        seeds = [b"metadata", metadata_program.key().as_ref(), bond_nft.key().as_ref()],
+        bump,
+        seeds::program = metadata_program.key(),
+    )]
     pub bond_metadata: UncheckedAccount<'info>,
     /// CHECK: Bond Edition of the master edition NFT. Validated by derivation by MPL program.
-    #[account(mut)]
+    #[account(
+        mut,
+        seeds = [b"metadata", metadata_program.key().as_ref(), bond_nft.key().as_ref(),b"edition"],
+        bump,
+        seeds::program = metadata_program.key(),
+    )]
     pub bond_edition: UncheckedAccount<'info>,
     /// CHECK: PDA derived for the specific edition number, created by MPL CPI. Needs to be mutable and signer (payer).
-    #[account(mut)]
+    #[account(
+        mut,
+        seeds = [b"metadata", metadata_program.key().as_ref(), bond_nft.key().as_ref(), b"edition", bond.next_edition_marker.as_bytes()],
+        bump,
+        seeds::program = metadata_program.key(),
+    )]
     pub edition_mark_pda: UncheckedAccount<'info>,
 
     pub metadata_program: Program<'info, Metadata>,
@@ -139,33 +164,39 @@ impl<'info> BuyBond<'info> {
             bond.price,
         )?;
 
-        let master_edition_account_info = self.bond_edition.to_account_info();
-        let master_edition_data = master_edition_account_info.try_borrow_data()?;
-        let edition_deserializer = &mut &master_edition_data[..];
-        let master_edition_account = match MasterEdition::deserialize(edition_deserializer) {
-            Ok(account) => account,
-            Err(_) => return err!(Error::AccountNotMasterEdition),
-        };
+        let current_supply: u64;
+        let next_edition_number: u64;
+        {
+            let master_edition_account_info = self.bond_edition.to_account_info();
+            let master_edition_data = master_edition_account_info.try_borrow_data()?;
+            let edition_deserializer = &mut &master_edition_data[..];
+            let master_edition_account = match MasterEdition::deserialize(edition_deserializer) {
+                Ok(account) => account,
+                Err(_) => return err!(Error::AccountNotMasterEdition),
+            };
 
-        let current_supply = master_edition_account.supply;
-        let next_edition_number = current_supply
-            .checked_add(1)
-            .ok_or(Error::EditionOverflow)?;
-        msg!(
-            "Current Master Supply: {}, Next Edition: {}",
-            current_supply,
-            next_edition_number
-        );
+            current_supply = master_edition_account.supply;
+            next_edition_number = current_supply
+                .checked_add(1)
+                .ok_or(Error::EditionOverflow)?;
 
-        // Check against max_supply if the master edition has one
-        if let Some(max_supply) = master_edition_account.max_supply {
-            require!(current_supply < max_supply, Error::MaxSupplyReached);
+            if let Some(max_supply) = master_edition_account.max_supply {
+                require!(current_supply < max_supply, Error::MaxSupplyReached); // todo: test supply
+            }
         }
-
         let sol_strategy_bump = bumps.sol_strategy;
         let sol_strategy_seeds: &[&[u8]] = &[SolStrategy::SEED_PREFIX, &[sol_strategy_bump]];
         let signer_seeds: &[&[&[u8]]] = &[&sol_strategy_seeds[..]];
         let rent = &self.rent.to_account_info();
+
+        let mint_to_cpi_accounts = MintTo {
+            mint: self.buyer_bond_nft.to_account_info(),
+            to: self.buyer_token_account.to_account_info(),
+            authority: buyer.to_account_info(),
+        };
+        let mint_to_cpi_ctx =
+            CpiContext::new(self.token_program.to_account_info(), mint_to_cpi_accounts);
+        mint_to(mint_to_cpi_ctx, 1)?;
 
         let cpi_accounts = MintNewEditionFromMasterEditionViaTokenCpiAccounts {
             new_metadata: &self.buyer_metadata.to_account_info(),
@@ -183,6 +214,7 @@ impl<'info> BuyBond<'info> {
             system_program: &self.system_program.to_account_info(),
             rent: Some(rent),
         };
+
         let instruction_args = MintNewEditionFromMasterEditionViaTokenInstructionArgs {
             mint_new_edition_from_master_edition_via_token_args:
                 MintNewEditionFromMasterEditionViaTokenArgs {
@@ -197,27 +229,13 @@ impl<'info> BuyBond<'info> {
         )
         .invoke_signed(signer_seeds)?;
 
-        msg!(
-            "Successfully invoked MintNewEditionFromMasterEditionViaToken CPI for edition {}",
-            next_edition_number
-        );
-
-        let mint_to_cpi_accounts = MintTo {
-            mint: self.buyer_bond_nft.to_account_info(),
-            to: self.buyer_token_account.to_account_info(),
-            authority: buyer.to_account_info(),
-        };
-        let mint_to_cpi_ctx =
-            CpiContext::new(self.token_program.to_account_info(), mint_to_cpi_accounts);
-        mint_to(mint_to_cpi_ctx, 1)?;
-        msg!("Minted 1 token to buyer's ATA");
-
         self.bond_record.set_inner(BondRecord {
             collection: bond.key(),
             user: buyer.key(),
             minted: 1,
         });
-        bond.next_edition_number += next_edition_number;
+        bond.next_edition_number = next_edition_number + 1;
+        bond.next_edition_marker = (next_edition_number + 1).checked_div(248).ok_or(Error::EditionOverflow)?.to_string();
         sol_strategy.sol_from_bond += bond.price;
 
         Ok(())
