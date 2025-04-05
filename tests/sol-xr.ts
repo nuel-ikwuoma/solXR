@@ -6,7 +6,13 @@ import {Clock, startAnchor} from 'solana-bankrun';
 import {SolXr} from "../target/types/sol_xr";
 import {expect,} from "chai";
 import devKey from '../dev.json'
-import {getAccount, getAssociatedTokenAddress, getMint} from '@solana/spl-token'
+import {
+    createTransferInstruction,
+    getAssociatedTokenAddress,
+    createAssociatedTokenAccountInstruction,
+    getAccount,
+    getMint
+} from '@solana/spl-token';
 import {
     deserializeEdition,
     deserializeMasterEdition,
@@ -700,8 +706,6 @@ describe("sol-xr", async () => {
             [bondPDA.toBuffer()],
             program.programId
         );
-        const bondNFT = await getMint(program.provider.connection, bondNFTPDA);
-
         const edition = await getMasterEdition(bondNFTPDA);
 
         expect(bond.maturity.toNumber()).equal(maturity.toNumber());
@@ -923,6 +927,16 @@ describe("sol-xr", async () => {
             program.programId
         );
         const bond = await program.account.bond.fetch(bondPDA)
+
+        const editionBuffer = Buffer.alloc(8);
+        editionBuffer.writeBigUInt64LE(BigInt(2));
+        const [buyerBondNFTPDA] = PublicKey.findProgramAddressSync(
+            [bondPDA.toBuffer(), editionBuffer],
+            program.programId
+        );
+
+        await transferTokens(secondBuyer, lateBuyer.publicKey, buyerBondNFTPDA, 1)
+
         const testCases = [
             {
                 desc: "when account doesn't own edition",
@@ -981,24 +995,7 @@ describe("sol-xr", async () => {
                 time: bond.maturity.toNumber(),
             },
             {
-                desc: "buyer converts bond",
-                buyer: secondBuyer,
-                params: {
-                    edition: "2",
-                    convert: true,
-                    errorCode: null
-                },
-                expectedValue: {
-                    solFromBond: solStrategy.solFromBond.toNumber() - (bond.price.toNumber() * 2),
-                    solInTreasury: solStrategy.solInTreasury.toNumber() + bond.price.toNumber(),
-                    newBuyerBalance: 4989976713360,
-                    newSolxrBalance: 6666666666,
-                },
-                shouldSucceed: true,
-                time: bond.maturity.toNumber(),
-            },
-            {
-                desc: "buyer tries to converts bond again",
+                desc: "old bond owner tries to convert bond",
                 buyer: secondBuyer,
                 params: {
                     edition: "2",
@@ -1009,6 +1006,40 @@ describe("sol-xr", async () => {
                     solFromBond: solStrategy.solFromBond.toNumber() - (bond.price.toNumber() * 2),
                     solInTreasury: solStrategy.solInTreasury.toNumber() + bond.price.toNumber(),
                     newBuyerBalance: 4989976713360,
+                    newSolxrBalance: 6666666666,
+                },
+                shouldSucceed: false,
+                time: bond.maturity.toNumber(),
+            },
+            {
+                desc: "buyer convert bond",
+                buyer: lateBuyer,
+                params: {
+                    edition: "2",
+                    convert: true,
+                    errorCode: null
+                },
+                expectedValue: {
+                    solFromBond: solStrategy.solFromBond.toNumber() - (bond.price.toNumber() * 2),
+                    solInTreasury: solStrategy.solInTreasury.toNumber() + bond.price.toNumber(),
+                    newBuyerBalance: 4999997960720,
+                    newSolxrBalance: 6666666666,
+                },
+                shouldSucceed: true,
+                time: bond.maturity.toNumber(),
+            },
+            {
+                desc: "buyer tries to convert bond again",
+                buyer: lateBuyer,
+                params: {
+                    edition: "2",
+                    convert: true,
+                    errorCode: "InvalidTokenAmount"
+                },
+                expectedValue: {
+                    solFromBond: solStrategy.solFromBond.toNumber() - (bond.price.toNumber() * 2),
+                    solInTreasury: solStrategy.solInTreasury.toNumber() + bond.price.toNumber(),
+                    newBuyerBalance: 4999997960720,
                     newSolxrBalance: 6666666666,
                 },
                 shouldSucceed: false,
@@ -1030,8 +1061,6 @@ describe("sol-xr", async () => {
                 );
             }
             if (shouldSucceed) {
-                const buyAccountBefore = await provider.connection.getAccountInfo(buyer.publicKey);
-
                 await program.methods.convertBond(
                     new anchor.BN(solStrategy.nextBondId.toNumber() - 1),
                     new anchor.BN(params.edition),
@@ -1042,8 +1071,6 @@ describe("sol-xr", async () => {
                     .rpc();
 
                 const newSolStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
-
-                const bond = await program.account.bond.fetch(bondPDA)
 
                 const editionBuffer = Buffer.alloc(8);
                 editionBuffer.writeBigUInt64LE(BigInt(params.edition));
@@ -1134,8 +1161,39 @@ describe("sol-xr", async () => {
         })
     }
 
-    // todo: test convert after transfer
+    async function transferTokens(
+        sender: Keypair,
+        receiver: PublicKey,
+        mint: PublicKey,
+        amount: number
+    ): Promise<void> {
+        // Get the source ATA address
+        const sourceATA = await getAssociatedTokenAddress(mint, sender.publicKey);
 
+        // Get the destination ATA address
+        const destinationATA = await getAssociatedTokenAddress(mint, receiver);
+
+        // Instruction to create the destination ATA (idempotent in practice)
+        const createATAIx = createAssociatedTokenAccountInstruction(
+            sender.publicKey, // Payer (sender pays for ATA creation)
+            destinationATA, // ATA to create
+            receiver, // Owner of the ATA
+            mint // Token mint
+        );
+
+        // Instruction to transfer tokens
+        const transferIx = createTransferInstruction(
+            sourceATA, // Source ATA
+            destinationATA, // Destination ATA
+            sender.publicKey, // Authority (sender)
+            amount // Amount to transfer
+        );
+
+        // Build and send the transaction
+        const tx = new Transaction().add(createATAIx).add(transferIx);
+        await provider.sendAndConfirm(tx,[sender]);
+    }
+    
     async function fundAccount(keyPair: Keypair, amount: number) {
         const instruction = SystemProgram.transfer({
             fromPubkey: providerKeypair.publicKey,
