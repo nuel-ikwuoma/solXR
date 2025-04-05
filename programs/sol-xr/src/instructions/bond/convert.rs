@@ -22,6 +22,13 @@ pub struct ConvertBond<'info> {
 
     #[account(
         mut,
+        seeds = [b"treasury"],
+        bump
+    )]
+    pub treasury: SystemAccount<'info>,
+
+    #[account(
+        mut,
         seeds = [Bond::SEED_PREFIX,&id.to_le_bytes()],
         bump
     )]
@@ -29,7 +36,6 @@ pub struct ConvertBond<'info> {
 
     #[account(
         mut,
-        constraint = buyer_bond_nft.mint_authority == Some(buyer.key()).into() @ Error::InvalidMintAuthority,
         seeds = [bond.key().as_ref(), edition_number.to_le_bytes().as_ref()],
         bump
     )]
@@ -85,6 +91,7 @@ impl<'info> ConvertBond<'info> {
         let burn_cpi_ctx = CpiContext::new(self.token_program.to_account_info(), burn_cpi_accounts);
         burn(burn_cpi_ctx, 1)?;
 
+
         if convert {
             let solxr_to_mint = Self::calculate_solxr_to_mint(bond.price, bond.strike_price);
 
@@ -108,13 +115,18 @@ impl<'info> ConvertBond<'info> {
             self.sol_strategy.sol_from_bond -= bond.price;
             self.sol_strategy.sol_in_treasury += bond.price;
         } else {
+            let sol_strategy_bump = bumps.treasury;
+            let sol_strategy_seeds: &[&[u8]] = &[b"treasury", &[sol_strategy_bump]];
+            let signer_seeds: &[&[&[u8]]] = &[&sol_strategy_seeds[..]];
+
             system_program::transfer(
-                CpiContext::new(
+                CpiContext::new_with_signer(
                     self.system_program.to_account_info(),
                     system_program::Transfer {
-                        from: self.sol_strategy.to_account_info(),
+                        from: self.treasury.to_account_info(),
                         to: self.buyer.to_account_info(),
                     },
+                    signer_seeds,
                 ),
                 bond.price,
             )?;
@@ -135,8 +147,6 @@ impl<'info> ConvertBond<'info> {
 enum Error {
     #[msg("The bond has not yet matured.")]
     BondNotMatured,
-    #[msg("The mint authority of the bond NFT does not match the buyer.")]
-    InvalidMintAuthority,
     #[msg("The token account must contain exactly 1 NFT.")]
     InvalidTokenAmount,
 }

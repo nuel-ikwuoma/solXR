@@ -39,6 +39,13 @@ pub struct Invest<'info> {
     )]
     pub sol_strategy: Account<'info, SolStrategy>,
 
+    #[account(
+        mut,
+        seeds = [b"treasury"],
+        bump
+    )]
+    pub treasury: SystemAccount<'info>,
+
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
@@ -57,7 +64,7 @@ impl<'info> Invest<'info> {
                 self.system_program.to_account_info(),
                 system_program::Transfer {
                     from: self.investor.to_account_info(),
-                    to: self.sol_strategy.to_account_info(),
+                    to: self.treasury.to_account_info(),
                 },
             ),
             amount,

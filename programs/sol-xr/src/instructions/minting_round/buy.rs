@@ -43,6 +43,13 @@ pub struct BuySolxr<'info> {
 
     #[account(
         mut,
+        seeds = [b"treasury"],
+        bump
+    )]
+    pub treasury: SystemAccount<'info>,
+
+    #[account(
+        mut,
         constraint = sol_strategy.allow_new_mint == true @ Error::MintingNotAllowed, // check if new mint is open
         constraint = sol_strategy.next_minting_rounds == id @ Error::InvalidMintingRound, // check if new mint is open
         constraint = Self::calculate_solxr_to_mint(amount, mint_round.premium) + mint_round.solxr_minted <= mint_round.solxr_available @ Error::ExceedsAvailableSolxr, // check if amount won't go over available mint
@@ -100,7 +107,7 @@ impl<'info> BuySolxr<'info> {
                 self.system_program.to_account_info(),
                 system_program::Transfer {
                     from: self.investor.to_account_info(),
-                    to: self.sol_strategy.to_account_info(),
+                    to: self.treasury.to_account_info(),
                 },
             ),
             amount.sub(platform_fee),

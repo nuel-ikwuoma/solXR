@@ -40,6 +40,13 @@ pub struct BuyBond<'info> {
 
     #[account(
         mut,
+        seeds = [b"treasury"],
+        bump
+    )]
+    pub treasury: SystemAccount<'info>,
+
+    #[account(
+        mut,
         seeds = [Bond::SEED_PREFIX,&id.to_le_bytes()],
         bump
     )]
@@ -158,7 +165,7 @@ impl<'info> BuyBond<'info> {
                 self.system_program.to_account_info(),
                 system_program::Transfer {
                     from: buyer.to_account_info(),
-                    to: sol_strategy.to_account_info(),
+                    to: self.treasury.to_account_info(),
                 },
             ),
             bond.price,

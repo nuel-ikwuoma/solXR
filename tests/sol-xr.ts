@@ -33,7 +33,6 @@ describe("sol-xr", async () => {
 
     const provider = new BankrunProvider(context);
     const providerKeypair = provider.wallet as anchor.Wallet;
-    // const metaplex = Metaplex.make(provider.connection);
     const program = new anchor.Program<SolXr>(IDL, provider);
 
     const initialPoolCap = 10_000 * LAMPORTS_PER_SOL;
@@ -723,14 +722,15 @@ describe("sol-xr", async () => {
         }
     });
 
-    await it("should mint bond nft", async () => {
-            const firstBuyer = Keypair.generate();
-            await fundAccount(firstBuyer, 5000)
-            const secondBuyer = Keypair.generate();
-            await fundAccount(secondBuyer, 5000)
-            const lateBuyer = Keypair.generate();
-            await fundAccount(lateBuyer, 5000)
+    // Key pairs to be used for further test
+    const firstBuyer = Keypair.generate();
+    await fundAccount(firstBuyer, 5000)
+    const secondBuyer = Keypair.generate();
+    await fundAccount(secondBuyer, 5000)
+    const lateBuyer = Keypair.generate();
+    await fundAccount(lateBuyer, 5000)
 
+    await it("should mint bond nft", async () => {
             const solStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
 
             const idBuffer = Buffer.alloc(8);
@@ -835,8 +835,6 @@ describe("sol-xr", async () => {
             ]
             for (const {desc, params, shouldSucceed, expectedValue, time, buyer} of testCases) {
                 console.log(`when ${desc}`)
-
-
                 if (time > 0) {
                     const currentClock = await provider.context.banksClient.getClock();
                     provider.context.setClock(
@@ -914,6 +912,178 @@ describe("sol-xr", async () => {
             }
         }
     )
+
+    await it("should convert bond nft", async () => {
+        const solStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
+
+        const idBuffer = Buffer.alloc(8);
+        idBuffer.writeBigUInt64LE(BigInt(solStrategy.nextBondId.toNumber() - 1));
+        const [bondPDA] = PublicKey.findProgramAddressSync(
+            [Buffer.from("bond"), idBuffer],
+            program.programId
+        );
+        const bond = await program.account.bond.fetch(bondPDA)
+        const testCases = [
+            {
+                desc: "when account doesn't own edition",
+                buyer: lateBuyer,
+                params: {
+                    edition: "1",
+                    convert: true,
+                    errorCode: "AccountNotInitialized"
+                },
+                expectedValue: {},
+                shouldSucceed: false,
+                time: bond.endTime.toNumber(),
+            },
+            {
+                desc: "when bond has not matured",
+                buyer: firstBuyer,
+                params: {
+                    edition: "1",
+                    convert: true,
+                    errorCode: "BondNotMatured"
+                },
+                expectedValue: {},
+                shouldSucceed: false,
+                time: bond.endTime.toNumber(),
+            },
+            {
+                desc: "buyer doesn't convert bond",
+                buyer: firstBuyer,
+                params: {
+                    edition: "1",
+                    convert: false,
+                    errorCode: null
+                },
+                expectedValue: {
+                    solInTreasury: solStrategy.solInTreasury.toNumber(),
+                    solFromBond: solStrategy.solFromBond.toNumber() - bond.price.toNumber(),
+                    newBuyerBalance: 4999975599760,
+                },
+                shouldSucceed: true,
+                time: bond.maturity.toNumber(),
+            },
+            {
+                desc: "buyer tries to convert bond again",
+                buyer: firstBuyer,
+                params: {
+                    edition: "1",
+                    convert: false,
+                    errorCode: "InvalidTokenAmount"
+                },
+                expectedValue: {
+                    solInTreasury: solStrategy.solInTreasury.toNumber(),
+                    solFromBond: solStrategy.solFromBond.toNumber() - bond.price.toNumber(),
+                    newBuyerBalance: 4999975599760,
+                },
+                shouldSucceed: false,
+                time: bond.maturity.toNumber(),
+            },
+            {
+                desc: "buyer converts bond",
+                buyer: secondBuyer,
+                params: {
+                    edition: "2",
+                    convert: true,
+                    errorCode: null
+                },
+                expectedValue: {
+                    solFromBond: solStrategy.solFromBond.toNumber() - (bond.price.toNumber() * 2),
+                    solInTreasury: solStrategy.solInTreasury.toNumber() + bond.price.toNumber(),
+                    newBuyerBalance: 4989976713360,
+                    newSolxrBalance: 6666666666,
+                },
+                shouldSucceed: true,
+                time: bond.maturity.toNumber(),
+            },
+            {
+                desc: "buyer tries to converts bond again",
+                buyer: secondBuyer,
+                params: {
+                    edition: "2",
+                    convert: true,
+                    errorCode: "InvalidTokenAmount"
+                },
+                expectedValue: {
+                    solFromBond: solStrategy.solFromBond.toNumber() - (bond.price.toNumber() * 2),
+                    solInTreasury: solStrategy.solInTreasury.toNumber() + bond.price.toNumber(),
+                    newBuyerBalance: 4989976713360,
+                    newSolxrBalance: 6666666666,
+                },
+                shouldSucceed: false,
+                time: bond.maturity.toNumber(),
+            },
+        ]
+        for (const {desc, params, shouldSucceed, expectedValue, time, buyer} of testCases) {
+            console.log(`when ${desc}`)
+            if (time > 0) {
+                const currentClock = await provider.context.banksClient.getClock();
+                provider.context.setClock(
+                    new Clock(
+                        currentClock.slot,
+                        currentClock.epochStartTimestamp,
+                        currentClock.epoch,
+                        currentClock.leaderScheduleEpoch,
+                        BigInt(time),
+                    ),
+                );
+            }
+            if (shouldSucceed) {
+                const buyAccountBefore = await provider.connection.getAccountInfo(buyer.publicKey);
+
+                await program.methods.convertBond(
+                    new anchor.BN(solStrategy.nextBondId.toNumber() - 1),
+                    new anchor.BN(params.edition),
+                    params.convert
+                )
+                    .accounts({buyer: buyer.publicKey})
+                    .signers([buyer])
+                    .rpc();
+
+                const newSolStrategy = await program.account.solStrategy.fetch(solStrategyPDA)
+
+                const bond = await program.account.bond.fetch(bondPDA)
+
+                const editionBuffer = Buffer.alloc(8);
+                editionBuffer.writeBigUInt64LE(BigInt(params.edition));
+                const [buyerBondNFTPDA] = PublicKey.findProgramAddressSync(
+                    [bondPDA.toBuffer(), editionBuffer],
+                    program.programId
+                );
+                const buyerBondTokenAccount = await getAssociatedTokenAddress(buyerBondNFTPDA, buyer.publicKey);
+                const buyerBondTokenAccountInfo = await getAccount(program.provider.connection, buyerBondTokenAccount);
+                const solxrTokenAccount = await getAssociatedTokenAddress(tokenPDA, buyer.publicKey);
+                const solxrTokenAccountInfo = await getAccount(program.provider.connection, solxrTokenAccount);
+                const buyerAccountAfter = await provider.connection.getAccountInfo(buyer.publicKey);
+
+                expect(newSolStrategy.solFromBond.toNumber()).equal(expectedValue.solFromBond, `sol made from bond should be ${expectedValue.solFromBond}`)
+                expect(newSolStrategy.solInTreasury.toNumber()).equal(expectedValue.solInTreasury, `sol in treasury should be ${expectedValue.solFromBond}`)
+                expect(Number(buyerBondTokenAccountInfo.amount)).equal(0, `buyer bond nft account amount should be 0`)
+                expect(buyerAccountAfter.lamports).equal(expectedValue.newBuyerBalance, `buyer new balance should be ${expectedValue.newBuyerBalance}`)
+                params.convert && expect(Number(solxrTokenAccountInfo.amount)).equal(expectedValue.newSolxrBalance, `buyer solxr account amount should be ${expectedValue.newSolxrBalance}`)
+            } else {
+                try {
+                    await program.methods.convertBond(
+                        new anchor.BN(solStrategy.nextBondId.toNumber() - 1),
+                        new anchor.BN(params.edition),
+                        params.convert
+                    )
+                        .accounts({buyer: buyer.publicKey})
+                        .signers([buyer])
+                        .rpc();
+                    expect.fail("Expected an error but the instruction succeeded");
+
+                } catch (error: any) {
+                    let msg = error.message as string
+                    console.log(msg, "->", params.errorCode)
+                    expect(msg.includes('AnchorError')).true
+                    expect(msg.includes(`Error Code: ${params.errorCode}`)).true
+                }
+            }
+        }
+
+    })
 
     async function getMasterEdition(mintAddress: PublicKey): Promise<MasterEdition> {
         // Get master edition PDA
