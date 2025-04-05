@@ -181,7 +181,7 @@ impl<'info> SellBond<'info> {
             },
             CreateMasterEditionV3InstructionArgs {
                 max_supply: Some(supply),
-            }, // todo: test that supply is limited
+            },
         );
         master_edition_account.invoke_signed(mint_auth_signer)?;
 

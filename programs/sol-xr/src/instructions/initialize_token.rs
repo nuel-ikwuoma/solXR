@@ -85,6 +85,7 @@ impl<'info> InitializeToken<'info> {
             next_minting_rounds: 1,
             mint_duration: DURATION,
             next_bond_id: 1,
+            next_whitelist_id: 1,
         });
 
         let token_metadata = &self.token_metadata.to_account_info();

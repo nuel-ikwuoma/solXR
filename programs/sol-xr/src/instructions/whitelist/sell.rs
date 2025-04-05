@@ -1,5 +1,5 @@
 use {
-    crate::state::{bonds::Bond, sol_strategy::SolStrategy},
+    crate::state::{whitelists::Whitelist, sol_strategy::SolStrategy},
     anchor_lang::prelude::*,
     anchor_spl::{
         associated_token::AssociatedToken,
@@ -19,7 +19,7 @@ use {
 };
 
 #[derive(Accounts)]
-pub struct SellBond<'info> {
+pub struct SellWhitelist<'info> {
     #[account(
         mut,
         constraint = sol_strategy.governance_authority.key() == governance_authority.key() @ Error::UnauthorizedGovernanceAuthority,
@@ -36,11 +36,11 @@ pub struct SellBond<'info> {
     #[account(
         init,
         payer = governance_authority,
-        space = 8 + Bond::INIT_SPACE,
-        seeds = [Bond::SEED_PREFIX,sol_strategy.next_bond_id.to_le_bytes().as_ref()],
+        space = 8 + Whitelist::INIT_SPACE,
+        seeds = [Whitelist::SEED_PREFIX,sol_strategy.next_whitelist_id.to_le_bytes().as_ref()],
         bump
     )]
-    pub bond: Account<'info, Bond>,
+    pub whitelist: Account<'info, Whitelist>,
 
     #[account(
         init,
@@ -48,34 +48,34 @@ pub struct SellBond<'info> {
         mint::decimals = 0,
         mint::authority = sol_strategy,
         mint::freeze_authority = sol_strategy,
-        seeds = [bond.key().as_ref()],
+        seeds = [whitelist.key().as_ref()],
         bump
     )]
-    pub bond_nft: Account<'info, Mint>,
+    pub whitelist_nft: Account<'info, Mint>,
 
     #[account(
         init,
         payer = governance_authority,
-        associated_token::mint = bond_nft,
+        associated_token::mint = whitelist_nft,
         associated_token::authority = sol_strategy,
     )]
-    pub bond_token_account: Account<'info, TokenAccount>,
+    pub whitelist_token_account: Account<'info, TokenAccount>,
     /// CHECK: Validated by PDA derivation
     #[account(
         mut,
-        seeds = [b"metadata", metadata_program.key().as_ref(), bond_nft.key().as_ref()],
+        seeds = [b"metadata", metadata_program.key().as_ref(), whitelist_nft.key().as_ref()],
         bump,
         seeds::program = metadata_program.key(),
     )]
-    pub bond_metadata: UncheckedAccount<'info>,
+    pub whitelist_metadata: UncheckedAccount<'info>,
     /// CHECK: Validated by PDA derivation
     #[account(
         mut,
-        seeds = [b"metadata", metadata_program.key().as_ref(), bond_nft.key().as_ref(),b"edition"],
+        seeds = [b"metadata", metadata_program.key().as_ref(), whitelist_nft.key().as_ref(),b"edition"],
         bump,
         seeds::program = metadata_program.key(),
     )]
-    pub bond_edition: UncheckedAccount<'info>,
+    pub whitelist_edition: UncheckedAccount<'info>,
 
     pub metadata_program: Program<'info, Metadata>,
     pub token_program: Program<'info, Token>,
@@ -84,25 +84,23 @@ pub struct SellBond<'info> {
     pub rent: Sysvar<'info, Rent>,
 }
 
-impl<'info> SellBond<'info> {
+impl<'info> SellWhitelist<'info> {
     pub fn handler(
         &mut self,
-        bumps: &SellBondBumps,
+        bumps: &SellWhitelistBumps,
         name: String,
         symbol: String,
         uri: String,
-        maturity: u64,
-        strike_price: u64,
-        supply: u64,
         price: u64,
+        maturity: u64,
+        expiration: u64,
         max_mint_per_wallet: u64,
         start_time: u64,
         end_time: u64,
     ) -> Result<()> {
-        self.bond.set_inner(Bond {
+        self.whitelist.set_inner(Whitelist {
             maturity,
-            strike_price,
-            supply,
+            expiration,
             price,
             max_mint_per_wallet,
             start_time,
@@ -115,9 +113,9 @@ impl<'info> SellBond<'info> {
         let mint_auth_seeds: &[&[u8]] = &[SolStrategy::SEED_PREFIX, &[mint_auth_bump]];
         let mint_auth_signer: &[&[&[u8]]] = &[&mint_auth_seeds[..]];
 
-        let nft_metadata = &self.bond_metadata.to_account_info();
-        let master_edition = &self.bond_edition.to_account_info();
-        let bond_nft = &self.bond_nft.to_account_info();
+        let nft_metadata = &self.whitelist_metadata.to_account_info();
+        let master_edition = &self.whitelist_edition.to_account_info();
+        let whitelist_nft = &self.whitelist_nft.to_account_info();
         let authority = &self.sol_strategy.to_account_info();
         let payer = &self.governance_authority.to_account_info();
         let system_program = &self.system_program.to_account_info();
@@ -129,8 +127,8 @@ impl<'info> SellBond<'info> {
         let mint_cpi = CpiContext::new_with_signer(
             token_program.clone(),
             MintTo {
-                mint: bond_nft.clone(),
-                to: self.bond_token_account.to_account_info(),
+                mint: whitelist_nft.clone(),
+                to: self.whitelist_token_account.to_account_info(),
                 authority: authority.clone(),
             },
             mint_auth_signer,
@@ -142,7 +140,7 @@ impl<'info> SellBond<'info> {
             metadata_program,
             CreateMetadataAccountV3CpiAccounts {
                 metadata: nft_metadata,
-                mint: bond_nft,
+                mint: whitelist_nft,
                 mint_authority: authority,
                 payer,
                 update_authority: (authority, true),
@@ -172,7 +170,7 @@ impl<'info> SellBond<'info> {
                 edition: master_edition,
                 update_authority: authority,
                 mint_authority: authority,
-                mint: bond_nft,
+                mint: whitelist_nft,
                 payer,
                 metadata: nft_metadata,
                 token_program,
@@ -180,12 +178,12 @@ impl<'info> SellBond<'info> {
                 rent: Some(rent),
             },
             CreateMasterEditionV3InstructionArgs {
-                max_supply: Some(supply),
-            }, // todo: test that supply is limited
+                max_supply: None,
+            },
         );
         master_edition_account.invoke_signed(mint_auth_signer)?;
 
-        self.sol_strategy.next_bond_id += 1;
+        self.sol_strategy.next_whitelist_id += 1;
 
         Ok(())
     }

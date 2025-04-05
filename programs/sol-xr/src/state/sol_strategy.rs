@@ -40,6 +40,8 @@ pub struct SolStrategy {
 
     /// Next bond id
     pub next_bond_id: u64,
+    /// Next bond id
+    pub next_whitelist_id: u64,
 }
 
 impl SolStrategy {

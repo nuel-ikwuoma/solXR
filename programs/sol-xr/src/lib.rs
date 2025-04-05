@@ -5,8 +5,8 @@ pub mod state;
 use anchor_lang::prelude::*;
 
 pub use constants::*;
-pub use state::*;
 pub use instructions::*;
+pub use state::*;
 
 declare_id!("2oAJBBNEGWnxbH65MEWuehjjmbN6Gk9uLiK9Wt6cR3cT");
 
@@ -78,5 +78,40 @@ pub mod sol_xr {
     ) -> Result<()> {
         ctx.accounts
             .handler(&ctx.bumps, id, edition_number, convert)
+    }
+    pub fn sell_whitelist(
+        ctx: Context<SellWhitelist>,
+        name: String,
+        symbol: String,
+        uri: String,
+        price: u64,
+        maturity: u64,
+        expiration: u64,
+        max_mint_per_wallet: u64,
+        start_time: u64,
+        end_time: u64,
+    ) -> Result<()> {
+        ctx.accounts.handler(
+            &ctx.bumps,
+            name,
+            symbol,
+            uri,
+            price,
+            maturity,
+            expiration,
+            max_mint_per_wallet,
+            start_time,
+            end_time,
+        )
+    }
+    pub fn buy_whitelist(ctx: Context<BuyWhitelist>, id: u64) -> Result<()> {
+        ctx.accounts.handler(&ctx.bumps, id)
+    }
+    pub fn convert_whitelist(
+        ctx: Context<ConvertWhitelist>,
+        id: u64,
+        edition_number: u64,
+    ) -> Result<()> {
+        ctx.accounts.handler(&ctx.bumps, id, edition_number)
     }
 }

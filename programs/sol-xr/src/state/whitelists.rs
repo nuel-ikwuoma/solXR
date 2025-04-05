@@ -29,3 +29,12 @@ pub struct WhitelistRecord {
 impl WhitelistRecord {
     pub const SEED_PREFIX: &'static [u8] = b"whitelist_record";
 }
+
+#[account]
+#[derive(InitSpace)]
+pub struct WhitelistNFTRecord {
+    pub converted: bool,
+}
+impl WhitelistNFTRecord {
+    pub const SEED_PREFIX: &'static [u8] = b"whitelist_nft_record";
+}
